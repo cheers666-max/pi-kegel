@@ -697,6 +697,69 @@ test("i18n: language is part of the sanitized config", () => {
 	assert.equal(sanitize({ lang: "fr" as never }).lang, DEFAULT_CONFIG.lang, "unknown language falls back");
 });
 
+test("i18n: the default voice is language-aware end to end", () => {
+	// Regression: DEFAULT_CONFIG.voice was still "Tingting", so an English user got
+	// a Chinese voice reading English words. Testing resolveVoice("en", "") in
+	// isolation missed it - the wiring passed the config value through.
+	assert.equal(DEFAULT_CONFIG.voice, "", "the shipped default must mean 'by language'");
+	for (const lang of ["zh", "en"] as const) {
+		const configured = sanitize({}).voice;
+		assert.equal(
+			resolveVoice(lang, configured),
+			STRINGS[lang].defaultVoice,
+			`a fresh config must speak ${STRINGS[lang].defaultVoice} in ${lang}`,
+		);
+	}
+	// a config that predates the language setting carries the old default
+	const legacyConfig = { voice: "Tingting", sound: true } as unknown as Partial<
+		Parameters<typeof sanitize>[0]
+	>;
+	assert.equal(resolveVoice("en", sanitize(legacyConfig).voice), "Samantha");
+});
+
+test("i18n: a legacy voice of Tingting is treated as unset", () => {
+	// A config written before the language setting spells out the old default.
+	assert.equal(sanitize({ voice: "Tingting" }).voice, "", "legacy default -> unset");
+	// `sound` is the pre-0.2 field, so a config carrying it is definitely legacy
+	const legacy = { voice: "Tingting", sound: true } as unknown as Partial<Parameters<typeof sanitize>[0]>;
+	assert.equal(sanitize(legacy).voice, "", "legacy sound flag too");
+	// Once a config has `lang`, an explicit voice is a deliberate choice.
+	assert.equal(sanitize({ voice: "Tingting", lang: "en" }).voice, "Tingting", "explicit voice kept");
+	assert.equal(sanitize({ voice: "Samantha" }).voice, "Samantha", "a non-legacy voice is kept");
+	assert.equal(sanitize({ voice: "" }).voice, "", "empty stays empty");
+});
+
+test("i18n: every settings row separates its label from its value", () => {
+	// Regression: these rows were built by gluing a label onto a value, which
+	// produced "LanguageEnglish" and "结束前滴答最后 3 秒". Each row is now a
+	// function of its value, so this asserts the separator really is inside.
+	const rows = (t: Strings) => [
+		t.settingsCue(t.systemSound(70)),
+		t.settingsCue(t.spoken("Samantha")),
+		t.settingsTick(t.lastSeconds(3)),
+		t.settingsTick(t.off),
+		t.settingsVisual(t.visualBloom),
+		t.settingsBloomOn(t.bloomOnRelax),
+		t.settingsLang("English"),
+		t.settingsLog(t.onOff(true)),
+		t.settingsAskRating(t.onOff(false)),
+		t.settingsAutoStart(t.onOff(true)),
+		t.settingsAutoStop(t.onOff(false)),
+		t.settingsPauseWhenIdle(t.onOff(true)),
+		t.settingsPrepare("4s"),
+	];
+	for (const [lang, separator] of [["zh", "："], ["en", ": "]] as const) {
+		for (const row of rows(STRINGS[lang])) {
+			assert.ok(row.includes(separator), `${lang} row is missing its "${separator}" separator: ${row}`);
+			const [label, value] = row.split(separator);
+			assert.ok(label.trim().length > 0, `${lang} row has an empty label: ${row}`);
+			assert.ok(value.trim().length > 0, `${lang} row has an empty value: ${row}`);
+			// A value must not itself start with the separator ("Visual: : x")
+			assert.ok(!value.trimStart().startsWith(separator.trim()), `doubled separator: ${row}`);
+		}
+	}
+});
+
 test("i18n: the spoken voice follows the language unless overridden", () => {
 	assert.equal(resolveVoice("zh", ""), "Tingting", "zh default voice");
 	assert.equal(resolveVoice("en", ""), "Samantha", "en default voice");

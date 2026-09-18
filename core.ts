@@ -11,6 +11,9 @@ export type Phase = "idle" | "prepare" | "contract" | "relax" | "setRest" | "don
 
 export type { Lang };
 
+/** The pre-0.4 default voice, which really meant "whatever the language needs". */
+const LEGACY_VOICE = "Tingting";
+
 export interface KegelConfig {
 	/** Seconds to hold the contraction. */
 	contractSec: number;
@@ -36,7 +39,7 @@ export interface KegelConfig {
 	 * boundary is coming without looking. 0 disables it.
 	 */
 	tickLastSec: number;
-	/** Voice used for `cue: "voice"` (macOS `say` voice name). */
+	/** Voice used for `cue: "voice"` (macOS `say` voice name, "" = by language). */
 	voice: string;
 	/** Start a session automatically when the agent starts working. */
 	autoStart: boolean;
@@ -74,7 +77,8 @@ export const DEFAULT_CONFIG: KegelConfig = {
 	cue: "system",
 	volume: 0.7,
 	tickLastSec: 3,
-	voice: "Tingting",
+	// "" means "pick the voice from the UI language" - see resolveVoice().
+	voice: "",
 	autoStart: true,
 	autoStop: false,
 	pauseWhenIdle: true,
@@ -162,7 +166,16 @@ export function sanitize(config: Partial<KegelConfig>): KegelConfig {
 					: DEFAULT_CONFIG.cue,
 		volume: clampFloat(config.volume, 0, 1, DEFAULT_CONFIG.volume),
 		tickLastSec: clampInt(config.tickLastSec, 0, 10, DEFAULT_CONFIG.tickLastSec),
-		voice: typeof config.voice === "string" && config.voice.trim() ? config.voice.trim() : DEFAULT_CONFIG.voice,
+		// `voice` used to default to "Tingting"; a config written back then has it
+		// spelled out, which under the current rules would pin a Chinese voice even
+		// in English. A config without `lang` predates the language setting, so that
+		// "Tingting" was never a deliberate choice - treat it as unset.
+		voice:
+			typeof config.voice === "string" &&
+			config.voice.trim() &&
+			!(config.lang === undefined && config.voice.trim() === LEGACY_VOICE)
+				? config.voice.trim()
+				: DEFAULT_CONFIG.voice,
 		autoStart: config.autoStart ?? DEFAULT_CONFIG.autoStart,
 		autoStop: config.autoStop ?? DEFAULT_CONFIG.autoStop,
 		pauseWhenIdle: config.pauseWhenIdle ?? DEFAULT_CONFIG.pauseWhenIdle,

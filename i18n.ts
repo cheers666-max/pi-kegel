@@ -88,23 +88,30 @@ export interface Strings {
 
 	// ── settings ──
 	settingsTitle: string;
-	settingsCue: string;
-	settingsTick: string;
-	settingsTickValue: (seconds: number) => string;
-	settingsVisual: string;
+	/**
+	 * Every settings row owns its own separator: it is a function of the value,
+	 * not a label to be glued onto one. Concatenating a label and a value by
+	 * hand is how "LanguageEnglish" and "结束前滴答最后 3 秒" happen.
+	 */
+	settingsCue: (value: string) => string;
+	settingsTick: (value: string) => string;
+	settingsVisual: (value: string) => string;
+	settingsBloomOn: (value: string) => string;
+	settingsLang: (value: string) => string;
+	settingsLog: (value: string) => string;
+	settingsAskRating: (value: string) => string;
+	settingsAutoStart: (value: string) => string;
+	settingsAutoStop: (value: string) => string;
+	settingsPauseWhenIdle: (value: string) => string;
+	settingsPrepare: (value: string) => string;
+	settingsBack: string;
+	/** Values that go into the rows above. */
 	visualBloom: string;
 	visualBar: string;
-	settingsBloomOn: string;
 	bloomOnRelax: string;
 	bloomOnContract: string;
-	settingsLog: string;
-	settingsAskRating: string;
-	settingsAutoStart: string;
-	settingsAutoStop: string;
-	settingsPauseWhenIdle: string;
-	settingsPrepare: string;
-	settingsLang: string;
-	settingsBack: string;
+	/** Set rest, in the shared "last N seconds" unit. */
+	lastSeconds: (seconds: number) => string;
 	onOff: (value: boolean) => string;
 	systemSound: (percent: number) => string;
 	spoken: (voice: string) => string;
@@ -293,23 +300,23 @@ const zh: Strings = {
 	},
 
 	settingsTitle: "其它设置",
-	settingsCue: "音效：",
-	settingsTick: "结束前滴答",
-	settingsTickValue: (s) => `最后 ${s} 秒`,
-	settingsVisual: "可视化",
+	settingsCue: (value) => `音效：${value}`,
+	settingsTick: (value) => `结束前滴答：${value}`,
+	settingsVisual: (value) => `可视化：${value}`,
+	settingsBloomOn: (value) => `花瓣绽开于：${value}`,
+	settingsLang: (value) => `界面语言：${value}`,
+	settingsLog: (value) => `记录训练：${value}`,
+	settingsAskRating: (value) => `练完询问感受：${value}`,
+	settingsAutoStart: (value) => `模型开始工作时自动开始：${value}`,
+	settingsAutoStop: (value) => `模型结束后自动结束：${value}`,
+	settingsPauseWhenIdle: (value) => `模型空闲时自动暂停：${value}`,
+	settingsPrepare: (value) => `准备倒计时：${value}`,
+	settingsBack: "返回",
 	visualBloom: "花瓣绽放",
 	visualBar: "进度条",
-	settingsBloomOn: "花瓣绽开于",
 	bloomOnRelax: "放松时（收紧→聚拢）",
 	bloomOnContract: "收缩时（收紧→绽开）",
-	settingsLog: "记录训练",
-	settingsAskRating: "练完询问感受",
-	settingsAutoStart: "模型开始工作时自动开始",
-	settingsAutoStop: "模型结束后自动结束",
-	settingsPauseWhenIdle: "模型空闲时自动暂停",
-	settingsPrepare: "准备倒计时：",
-	settingsLang: "界面语言：",
-	settingsBack: "返回",
+	lastSeconds: (s) => `最后 ${s} 秒`,
 	onOff: (v) => (v ? "开" : "关"),
 	systemSound: (percent) => `系统音 ${percent}%`,
 	spoken: (voice) => `语音（${voice}）`,
@@ -503,23 +510,23 @@ const en: Strings = {
 	},
 
 	settingsTitle: "Settings",
-	settingsCue: "Audio: ",
-	settingsTick: "Countdown ticks",
-	settingsTickValue: (s) => `last ${s}s`,
-	settingsVisual: "Visual",
+	settingsCue: (value) => `Audio: ${value}`,
+	settingsTick: (value) => `Countdown ticks: ${value}`,
+	settingsVisual: (value) => `Visual: ${value}`,
 	visualBloom: "flower",
 	visualBar: "progress bar",
-	settingsBloomOn: "Flower opens on",
-	bloomOnRelax: "relax (contract gathers it)",
-	bloomOnContract: "contract (contract opens it)",
-	settingsLog: "Log training",
-	settingsAskRating: "Ask how it felt",
-	settingsAutoStart: "Auto-start when the agent works",
-	settingsAutoStop: "Auto-stop when the agent settles",
-	settingsPauseWhenIdle: "Freeze while the agent is idle",
-	settingsPrepare: "Prepare countdown: ",
-	settingsLang: "Language: ",
+	settingsBloomOn: (value) => `Flower opens on: ${value}`,
+	bloomOnRelax: "relax (contracting gathers it)",
+	bloomOnContract: "contract (contracting opens it)",
+	settingsLog: (value) => `Log training: ${value}`,
+	settingsAskRating: (value) => `Ask how it felt: ${value}`,
+	settingsAutoStart: (value) => `Auto-start when the agent works: ${value}`,
+	settingsAutoStop: (value) => `Auto-stop when the agent settles: ${value}`,
+	settingsPauseWhenIdle: (value) => `Freeze while the agent is idle: ${value}`,
+	settingsPrepare: (value) => `Prepare countdown: ${value}`,
+	settingsLang: (value) => `Language: ${value}`,
 	settingsBack: "Back",
+	lastSeconds: (s) => `last ${s}s`,
 	onOff: (v) => (v ? "on" : "off"),
 	systemSound: (percent) => `system sounds ${percent}%`,
 	spoken: (voice) => `spoken (${voice})`,

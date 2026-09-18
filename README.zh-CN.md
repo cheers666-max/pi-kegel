@@ -172,7 +172,7 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps)次"'
 }
 ```
 
-读入时会把越界值夹到合法区间，旧版（0.2 之前）的 `sound: true/false` 会自动迁移成 `cue`。
+读入时会把越界值夹到合法区间，旧写法会自动迁移：`sound: true/false` → `cue`；`voice` 若还是旧默认值 `Tingting`，会被当作「跟随语言」，避免英文界面用中文嗓子念英文。
 
 ## 快捷键
 
@@ -210,7 +210,7 @@ macos-option-as-alt = true
 三个纯逻辑模块都可以脱离 pi 独立跑：
 
 ```bash
-# 单元测试：状态机、呼吸曲线、点阵渲染、记录聚合、i18n 键对齐与单复数（47 项）
+# 单元测试：状态机、呼吸曲线、点阵渲染、记录聚合、i18n 键对齐、设置行分隔符与单复数（50 项）
 node --experimental-strip-types core.test.ts
 
 # 重新生成 README 素材（需要装过 pi，脚本会自己找到 pi-tui）

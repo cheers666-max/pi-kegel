@@ -170,7 +170,7 @@ Or edit `~/.pi/agent/kegel.json` directly:
 }
 ```
 
-Unknown or out-of-range values are clamped on load, and the pre-0.2 `sound: true/false` spelling is migrated automatically.
+Unknown or out-of-range values are clamped on load. Older spellings are migrated automatically: `sound: true/false` becomes `cue`, and a `voice` left at the old default (`Tingting`) is read as "pick by language" so an English UI never speaks in Chinese.
 
 ## Keys
 
@@ -201,7 +201,7 @@ The logic modules run standalone, with no pi dependency:
 
 ```bash
 # unit tests: state machine, breathing curve, dot rendering, log aggregation,
-# i18n key parity and pluralization (47 tests)
+# i18n key parity, settings-row separators and pluralization (50 tests)
 node --experimental-strip-types core.test.ts
 
 # regenerate the README assets for one language (needs pi installed; the

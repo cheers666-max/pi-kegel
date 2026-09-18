@@ -685,58 +685,88 @@ async function openSettings(ctx: ExtensionContext): Promise<void> {
 				: config.cue === "voice"
 					? texts.spoken(voice())
 					: texts.off;
-		const choice = await ctx.ui.select(texts.settingsTitle, [
-			`${texts.settingsCue}${cueLabel}`,
-			`${texts.settingsTick}${config.tickLastSec > 0 ? texts.settingsTickValue(config.tickLastSec) : texts.off}`,
-			`${texts.settingsVisual}${config.visual === "bloom" ? texts.visualBloom : texts.visualBar}`,
-			`${texts.settingsBloomOn}${config.bloomOn === "relax" ? texts.bloomOnRelax : texts.bloomOnContract}`,
-			`${texts.settingsLang}${LANG_LABEL[lang()]}`,
-			`${texts.settingsLog}${texts.onOff(config.log)}`,
-			`${texts.settingsAskRating}${texts.onOff(config.askRating)}`,
-			`${texts.settingsAutoStart}${texts.onOff(config.autoStart)}`,
-			`${texts.settingsAutoStop}${texts.onOff(config.autoStop)}`,
-			`${texts.settingsPauseWhenIdle}${texts.onOff(config.pauseWhenIdle)}`,
-			`${texts.settingsPrepare}${config.prepareSec}s`,
-			texts.settingsBack,
-		]);
-		if (!choice || choice === texts.settingsBack) return;
-		if (choice.startsWith(texts.settingsCue)) {
-			// system -> voice -> off -> system
-			const next = config.cue === "system" ? "voice" : config.cue === "voice" ? "off" : "system";
-			engine.applyConfig({ cue: next });
-			if (next !== "off") previewCue();
-			if (next === "system") await pickVolume(ctx, config.volume);
-		} else if (choice.startsWith(texts.settingsTick)) {
-			const seconds = await askNumber(ctx, texts.tickTitle, String(config.tickLastSec), 0, 10, true);
-			if (seconds === undefined) continue;
-			engine.applyConfig({ tickLastSec: seconds });
-			if (engine.config.tickLastSec > 0) cue("tick", engine.config.tickLastSec);
-		} else if (choice.startsWith(texts.settingsVisual)) {
-			engine.applyConfig({ visual: config.visual === "bloom" ? "bar" : "bloom" });
-			invalidateWidget();
-		} else if (choice.startsWith(texts.settingsBloomOn)) {
-			engine.applyConfig({ bloomOn: config.bloomOn === "relax" ? "contract" : "relax" });
-			invalidateWidget();
-		} else if (choice.startsWith(texts.settingsLang)) {
-			const next = nextLang(lang());
-			engine.applyConfig({ lang: next });
-			invalidateWidget();
-			ctx.ui.notify(t(next).notifyLangChanged(LANG_LABEL[next]), "info");
-		} else if (choice.startsWith(texts.settingsLog)) {
-			engine.applyConfig({ log: !config.log });
-			if (!engine.config.log) ctx.ui.notify(texts.notifyLogOff, "info");
-		} else if (choice.startsWith(texts.settingsAskRating)) {
-			engine.applyConfig({ askRating: !config.askRating });
-		} else if (choice.startsWith(texts.settingsAutoStart)) {
-			engine.applyConfig({ autoStart: !config.autoStart });
-		} else if (choice.startsWith(texts.settingsAutoStop)) {
-			engine.applyConfig({ autoStop: !config.autoStop });
-		} else if (choice.startsWith(texts.settingsPauseWhenIdle)) {
-			engine.applyConfig({ pauseWhenIdle: !config.pauseWhenIdle });
-		} else if (choice.startsWith(texts.settingsPrepare)) {
-			const seconds = await askNumber(ctx, texts.prepareTitle, "3", 0, 30, true);
-			if (seconds === undefined) continue;
-			engine.applyConfig({ prepareSec: seconds });
+		// Rows carry their own values, so dispatch by key rather than by parsing
+		// the label back out of the rendered string.
+		const items: Array<{ label: string; key: string }> = [
+			{ label: texts.settingsCue(cueLabel), key: "cue" },
+			{
+				label: texts.settingsTick(config.tickLastSec > 0 ? texts.lastSeconds(config.tickLastSec) : texts.off),
+				key: "tick",
+			},
+			{
+				label: texts.settingsVisual(config.visual === "bloom" ? texts.visualBloom : texts.visualBar),
+				key: "visual",
+			},
+			{
+				label: texts.settingsBloomOn(config.bloomOn === "relax" ? texts.bloomOnRelax : texts.bloomOnContract),
+				key: "bloomOn",
+			},
+			{ label: texts.settingsLang(LANG_LABEL[lang()]), key: "lang" },
+			{ label: texts.settingsLog(texts.onOff(config.log)), key: "log" },
+			{ label: texts.settingsAskRating(texts.onOff(config.askRating)), key: "askRating" },
+			{ label: texts.settingsAutoStart(texts.onOff(config.autoStart)), key: "autoStart" },
+			{ label: texts.settingsAutoStop(texts.onOff(config.autoStop)), key: "autoStop" },
+			{ label: texts.settingsPauseWhenIdle(texts.onOff(config.pauseWhenIdle)), key: "pauseWhenIdle" },
+			{ label: texts.settingsPrepare(`${config.prepareSec}s`), key: "prepare" },
+			{ label: texts.settingsBack, key: "back" },
+		];
+		const choice = await ctx.ui.select(texts.settingsTitle, items.map((item) => item.label));
+		const key = items.find((item) => item.label === choice)?.key;
+		if (!key || key === "back") return;
+
+		switch (key) {
+			case "cue": {
+				// system -> voice -> off -> system
+				const next = config.cue === "system" ? "voice" : config.cue === "voice" ? "off" : "system";
+				engine.applyConfig({ cue: next });
+				if (next !== "off") previewCue();
+				if (next === "system") await pickVolume(ctx, config.volume);
+				break;
+			}
+			case "tick": {
+				const seconds = await askNumber(ctx, texts.tickTitle, String(config.tickLastSec), 0, 10, true);
+				if (seconds === undefined) continue;
+				engine.applyConfig({ tickLastSec: seconds });
+				if (engine.config.tickLastSec > 0) cue("tick", engine.config.tickLastSec);
+				break;
+			}
+			case "visual":
+				engine.applyConfig({ visual: config.visual === "bloom" ? "bar" : "bloom" });
+				invalidateWidget();
+				break;
+			case "bloomOn":
+				engine.applyConfig({ bloomOn: config.bloomOn === "relax" ? "contract" : "relax" });
+				invalidateWidget();
+				break;
+			case "lang": {
+				const next = nextLang(lang());
+				engine.applyConfig({ lang: next });
+				invalidateWidget();
+				ctx.ui.notify(t(next).notifyLangChanged(LANG_LABEL[next]), "info");
+				break;
+			}
+			case "log":
+				engine.applyConfig({ log: !config.log });
+				if (!engine.config.log) ctx.ui.notify(texts.notifyLogOff, "info");
+				break;
+			case "askRating":
+				engine.applyConfig({ askRating: !config.askRating });
+				break;
+			case "autoStart":
+				engine.applyConfig({ autoStart: !config.autoStart });
+				break;
+			case "autoStop":
+				engine.applyConfig({ autoStop: !config.autoStop });
+				break;
+			case "pauseWhenIdle":
+				engine.applyConfig({ pauseWhenIdle: !config.pauseWhenIdle });
+				break;
+			case "prepare": {
+				const seconds = await askNumber(ctx, texts.prepareTitle, "3", 0, 30, true);
+				if (seconds === undefined) continue;
+				engine.applyConfig({ prepareSec: seconds });
+				break;
+			}
 		}
 		saveConfig(engine.config);
 	}
@@ -793,7 +823,7 @@ async function showStatus(ctx: ExtensionContext): Promise<void> {
 					? texts.spoken(voice())
 					: texts.off,
 		),
-		texts.statusTick(engine.config.tickLastSec > 0 ? texts.settingsTickValue(engine.config.tickLastSec) : texts.off),
+		texts.statusTick(engine.config.tickLastSec > 0 ? texts.lastSeconds(engine.config.tickLastSec) : texts.off),
 		engine.config.visual === "bloom"
 			? texts.statusFlowerSize(Math.min(11, Math.max(3, Math.round(((tuiRef?.terminal?.rows ?? 40) - 14) / 3))))
 			: "",
