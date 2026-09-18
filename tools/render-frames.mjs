@@ -101,7 +101,9 @@ const CONFIG = arg("config", null)
 
 const COLS = Number(arg("cols", 100));
 const ROWS = Number(arg("rows", 42));
-const STEP_MS = Number(arg("step", 400));
+// 300ms keeps the bloom transition smooth (≈4 samples through it) while
+// still playing back at true speed in the GIF.
+const STEP_MS = Number(arg("step", 300));
 
 const engine = new KegelEngine(CONFIG);
 const widget = new KegelWidget(

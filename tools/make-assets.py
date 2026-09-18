@@ -28,10 +28,13 @@ ASSETS = ROOT / "assets"
 
 SCALE = 2
 COLORS = 32
+SPEED = 1.0
 if "--scale" in sys.argv:
     SCALE = float(sys.argv[sys.argv.index("--scale") + 1])
 if "--colors" in sys.argv:
     COLORS = int(sys.argv[sys.argv.index("--colors") + 1])
+if "--speed" in sys.argv:
+    SPEED = float(sys.argv[sys.argv.index("--speed") + 1])
 
 FONT_SIZE = int(14 * SCALE)
 CELL_W = None  # measured from the mono font below
@@ -312,14 +315,17 @@ def main():
     # GIF: sample every 400ms of workout time, play back at 90ms/frame (~4.4x)
     if MISSING:
         print(f"  !! 没有任何字体覆盖的字符: {sorted(MISSING)}")
-    gif_delay = 90
+    # Play at TRUE speed by default: the countdown in the corner has to match
+    # the wall clock, or the demo lies about the pacing. `--speed` is only for
+    # making a deliberately faster preview.
+    gif_delay = round(data["stepMs"] / SPEED)
     count = build_gif(data, ASSETS / "demo.gif", delay_ms=gif_delay, colors=COLORS)
     size_kb = (ASSETS / "demo.gif").stat().st_size / 1024
     workout_ms = data["frames"][-1]["ms"]
-    print(
-        f"  assets/demo.gif   {count} frames  {size_kb:.0f} KB  "
-        f"({workout_ms / 1000:.0f}s 训练压在 {count * gif_delay / 1000:.1f}s 内，{workout_ms / (count * gif_delay):.1f}x)"
-    )
+    play_s = count * gif_delay / 1000
+    ratio = (workout_ms / 1000) / play_s
+    speed = "1:1 真实速度" if abs(ratio - 1) < 0.05 else f"{ratio:.2f}x 速"
+    print(f"  assets/demo.gif   {count} frames  {size_kb:.0f} KB  ({play_s:.1f}s 循环，{speed})")
 
 
 if __name__ == "__main__":
