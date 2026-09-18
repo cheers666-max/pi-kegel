@@ -35,7 +35,8 @@ def check(label, ok, detail=""):
 
 
 def chars_in_frames():
-    data = json.loads((ROOT / "tools" / "frames.json").read_text())
+    name = "frames.en.json" if SUFFIX else "frames.json"
+    data = json.loads((ROOT / "tools" / name).read_text())
     out = set()
     for frame in data["frames"]:
         for line in frame["lines"]:
@@ -65,6 +66,11 @@ def ink(image, box):
     return (hi - lo + 1) if hi >= 0 else 0, ink_px
 
 
+SUFFIX = ".en" if "--lang" in sys.argv and sys.argv[sys.argv.index("--lang") + 1] == "en" else ""
+if "--lang" in sys.argv and sys.argv[sys.argv.index("--lang") + 1] not in ("zh", "en"):
+    raise SystemExit('--lang must be "zh" or "en"')
+
+
 def main():
     data, chars = chars_in_frames()
 
@@ -82,15 +88,15 @@ def main():
     box = flower_box(mk.CELL_W, mk.CELL_H, mk.PAD, mk.HEADER_H)
 
     # 2. the hero stills really differ
-    cw, cn = ink(Image.open(ROOT / "assets" / "contract.png"), box)
-    rw, rn = ink(Image.open(ROOT / "assets" / "relax.png"), box)
+    cw, cn = ink(Image.open(ROOT / "assets" / f"contract{SUFFIX}.png"), box)
+    rw, rn = ink(Image.open(ROOT / "assets" / f"relax{SUFFIX}.png"), box)
     check(
         f"收缩/放松两态花明显不同（宽 {cw}→{rw}px，墨迹 {cn}→{rn}px）",
         cw > 0 and rw > cw * 1.5 and rn > cn * 1.8,
     )
 
     # 3. the GIF animates, with intermediate frames rather than a hard snap
-    gif = Image.open(ROOT / "assets" / "demo.gif")
+    gif = Image.open(ROOT / "assets" / f"demo{SUFFIX}.gif")
     widths = []
     for index in range(gif.n_frames):
         gif.seek(index)
@@ -100,8 +106,8 @@ def main():
     check(f"GIF {gif.n_frames} 帧确实在呼吸（宽度 {uniq[0]}..{uniq[-1]}px）", len(uniq) >= 3, f"{len(uniq)} 种宽度")
     check(f"过渡是渐变而非突跳（{len(mid)} 个中间帧）", len(mid) >= 4)
 
-    size_kb = (ROOT / "assets" / "demo.gif").stat().st_size / 1024
-    print(f"\n  demo.gif {gif.size[0]}x{gif.size[1]}, {gif.n_frames} 帧, {size_kb:.0f} KB")
+    size_kb = (ROOT / "assets" / f"demo{SUFFIX}.gif").stat().st_size / 1024
+    print(f"\n  demo{SUFFIX}.gif {gif.size[0]}x{gif.size[1]}, {gif.n_frames} 帧, {size_kb:.0f} KB")
     print("\n素材校验全部通过" if not FAILURES else f"\n{len(FAILURES)} 项失败: {FAILURES}")
     return 1 if FAILURES else 0
 

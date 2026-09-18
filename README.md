@@ -6,15 +6,15 @@ A [pi](https://github.com/earendil-works/pi) extension that turns the time you s
 
 When the agent starts working, a flower drawn in **Braille dots** blooms above the editor: contract for 10 seconds, relax for 10, repeat. It disappears when you're done, asks how it felt, and keeps a daily log. No timer to remember, no app to switch to — you were going to sit there waiting anyway.
 
-![Training demo](assets/demo.gif)
+![Training demo](assets/demo.en.gif)
 
 > The GIF plays at **true speed**, not sped up. The demo uses a shortened 5s/5s × 2 prescription so the file stays reasonable — the default is 10s/10s × 8 × 3.
 
 | Contracting — the petals gather into a bud | Relaxing — they open back up |
 |---|---|
-| ![Contract](assets/contract.png) | ![Relax](assets/relax.png) |
+| ![Contract](assets/contract.en.png) | ![Relax](assets/relax.en.png) |
 
-> The widget's own labels are in Chinese (`收缩` / `放松`) — see [Limitations](#limitations).
+The interface ships in **English and Chinese** — pick it under ⚙️ Settings → Language, or run `/kegel lang en`. Screenshots above are the English UI.
 
 ---
 
@@ -69,17 +69,17 @@ The flower size adapts to terminal height (about a third of the screen). Below 2
 
 Every phase change makes a sound, so you can train with your eyes closed:
 
-| Moment | System sound | Spoken mode |
-|--------|--------------|-------------|
-| Prepare | `Morse` | 准备 |
-| Start **contract** | `Tink` (bright, high) | 收紧 |
-| Start **relax** | `Blow` (airy, soft) | 放松 |
-| Set rest | `Purr` | 休息 |
-| Final N seconds of a phase (once per second) | `Pop` at 45% volume | 3 / 2 / 1 |
-| Done | `Glass` | 完成 |
+| Moment | System sound | Spoken mode (EN) | Spoken mode (ZH) |
+|--------|--------------|--------------|--------------|
+| Prepare | `Morse` | "get ready" | 准备 |
+| Start **contract** | `Tink` (bright, high) | "squeeze" | 收紧 |
+| Start **relax** | `Blow` (airy, soft) | "relax" | 放松 |
+| Set rest | `Purr` | "rest" | 休息 |
+| Final N seconds of a phase (once per second) | `Pop` at 45% volume | 3 / 2 / 1 | 3 / 2 / 1 |
+| Done | `Glass` | "done" | 完成 |
 
 - **Ticking** (last 3 seconds by default) tells you a boundary is coming without looking. Phases shorter than 3.5s never tick — otherwise the rapid 1s/1s preset becomes a stream of clicks
-- **Spoken mode** uses macOS `say` (voice defaults to `Tingting`) and reads the cues in Chinese, like a coach counting for you
+- **Spoken mode** uses macOS `say`, with the voice picked from your UI language (`Samantha` for English, `Tingting` for Chinese) — override it with the `voice` setting
 - **Volume** via `afplay -v`, 0-100%
 - macOS only (`afplay` / `say`); silent everywhere else
 
@@ -97,9 +97,9 @@ Every run that **finishes naturally** is recorded (ending early with `alt+e` is 
 
 The rating isn't decoration. The real risk with pelvic-floor training is doing it wrong without noticing, so a run of 1s and 2s is a signal: see a doctor, or you're too tired to train today.
 
-`/kegel` → **📈 训练记录** shows:
+`/kegel` → **📈 Training log** shows:
 
-![Training log](assets/menu.png)
+![Training log](assets/menu.en.png)
 
 - Today's sessions, total contractions, total time, and today's average rating
 - The current streak (an empty today doesn't break it), lifetime totals, average rating
@@ -119,22 +119,23 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps) reps"'
 
 ## Presets
 
-| Preset | Prescription | Notes |
-|---|---|---|
-| Quick | 1s / 1s × 10 × 3 | Fast-twitch fibres, very fast rhythm |
-| Beginner | 3s / 6s × 10 × 3 | Start here if you can't feel the contraction |
-| Light | 5s / 10s × 10 × 3 | |
-| **Standard** | **10s / 10s × 8 × 3** | The default, and the usual clinical prescription |
-| Intense | 10s / 5s × 10 × 3 | Shorter rest, harder |
-| Endurance | 15s / 10s × 8 × 3 | |
-| Custom | anything | contract 1-120s, relax 1-120s, reps, sets, set rest |
+| Preset | Contract / relax | Reps × sets | Set rest | Roughly |
+|---|---|---|---|---|
+| Quick 1/1 | 1s / 1s | 20 × 3 | 30s | 3 min — fast-twitch fibres |
+| Beginner 5/5 | 5s / 5s | 8 × 2 | 30s | 3 min — start here if you can't feel the contraction |
+| **Standard 10/10** | **10s / 10s** | **8 × 3** | 30s | 9 min — the default, and the usual clinical prescription |
+| Endurance 10/5 | 10s / 5s | 10 × 3 | 30s | 8 min — shorter rest, harder |
+| Strength 15/10 | 15s / 10s | 6 × 2 | 40s | 6 min — long holds |
+| Endless 10/10 | 10s / 10s | ∞ | 30s | loops until you stop it |
+| Custom | 1-120s / 1-120s | 0-200 × 0-50 | 0-300s | anything (`0` reps or sets means endless) |
 
 ## Configuration
 
-`/kegel` → ⚙️ 其它设置:
+`/kegel` → ⚙️ **Settings**:
 
 | Setting | Default | Notes |
 |---|---|---|
+| Language | auto | follows `$LANG`; Chinese locales get Chinese, everything else English. Also `/kegel lang zh` / `en` / `auto` |
 | Audio | system sounds | system (with volume) → spoken → off |
 | End-of-phase ticks | last 3 seconds | 0-10 seconds, or off |
 | Visual | flower | or progress bar |
@@ -159,12 +160,13 @@ Or edit `~/.pi/agent/kegel.json` directly:
   "cue": "system",
   "volume": 0.7,
   "tickLastSec": 3,
-  "voice": "Tingting",
+  "voice": "",
   "visual": "bloom",
   "bloomOn": "relax",
   "log": true,
   "askRating": true,
-  "historyDays": 14
+  "historyDays": 14,
+  "lang": "auto"
 }
 ```
 
@@ -180,12 +182,12 @@ Unknown or out-of-range values are clamped on load, and the pre-0.2 `sound: true
 | Menu | `/kegel` |
 | Start a preset directly | `/kegel quick`, `/kegel standard`, … |
 | Status | `/kegel status` |
+| Switch language | `/kegel lang en` (or `zh` / `auto`; no argument cycles) |
 
 **If `alt+k` does nothing in Ghostty or Terminal.app**: those terminals default to `macos-option-as-alt = false`, so Option+K sends the composed character `˚` instead of `ESC k`. The extension catches `˚` / `˜` / `´` directly, so **it works out of the box with no terminal config**. If you prefer, set `macos-option-as-alt = true` in your Ghostty config; `ctrl+shift+k` / `ctrl+shift+n` / `ctrl+shift+e` also work on terminals that support the kitty keyboard protocol.
 
 ## Limitations
 
-- **The UI is in Chinese.** Widget labels, preset names, menus and audio cues are all Chinese. It's usable without reading them (the flower communicates the phase), but there's no i18n layer yet
 - **Audio is macOS-only** (`afplay` / `say`)
 - **Short model replies mean short sessions**: if the agent answers in a few seconds the workout gets interrupted almost immediately — that's what "freeze while the agent is idle" is for; it resumes when you next send a message
 - **Queued messages don't re-trigger a session**: a follow-up you type while the agent is busy belongs to the same run, so re-arming falls back to `turn_start` (verified)
@@ -198,10 +200,12 @@ Unknown or out-of-range values are clamped on load, and the pre-0.2 `sound: true
 The logic modules run standalone, with no pi dependency:
 
 ```bash
-# unit tests: state machine, breathing curve, dot rendering, log aggregation (33 tests)
+# unit tests: state machine, breathing curve, dot rendering, log aggregation,
+# i18n key parity and pluralization (47 tests)
 node --experimental-strip-types core.test.ts
 
-# regenerate the README assets (needs pi installed; the script finds pi-tui itself)
+# regenerate the README assets for one language (needs pi installed; the
+# scripts find pi-tui themselves). Repeat with `--lang en` for the English set.
 node --experimental-strip-types tools/render-frames.mjs   # sample frames (300ms each by default)
 python3 tools/make-assets.py                              # PNGs + GIF at true speed
 python3 tools/verify-assets.py                            # no eyeballs needed
@@ -212,9 +216,10 @@ python3 tools/verify-assets.py                            # no eyeballs needed
 | `core.ts` | State machine + config validation (pure, no TUI dependency) |
 | `bloom.ts` | Braille flower geometry and breathing curve (pure functions) |
 | `history.ts` | Training-log data layer + report rendering (pure functions) |
+| `i18n.ts` | Every user-facing string, in both languages (pure functions) |
 | `widget.ts` | Renders state as a terminal component |
 | `index.ts` | Extension entry: events, shortcuts, audio, menu orchestration |
-| `core.test.ts` | Unit tests |
+| `core.test.ts` | Unit tests (the widget's language rendering included) |
 
 The scripts under `tools/` render the **real** `widget.ts` / `bloom.ts` / `history.ts`, so the screenshots cannot drift from what actually ships. `verify-assets.py` exists because asset generation has silently broken three different ways: Menlo has no Braille block (the flower turned into `.notdef` boxes), quantised GIFs shift the background colour (breaking a naive "pixel ≠ background" ink test), and a frame sequence can render while never actually animating.
 

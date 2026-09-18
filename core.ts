@@ -5,7 +5,11 @@
  * A set = `reps` reps (+ optional set-rest before the next set).
  */
 
+import { type Lang, formatPlanIn, presetLabelIn, resolveLang, t } from "./i18n.ts";
+
 export type Phase = "idle" | "prepare" | "contract" | "relax" | "setRest" | "done";
+
+export type { Lang };
 
 export interface KegelConfig {
 	/** Seconds to hold the contraction. */
@@ -53,6 +57,11 @@ export interface KegelConfig {
 	askRating: boolean;
 	/** How many days the training-log report shows. */
 	historyDays: number;
+	/**
+	 * UI language. `"auto"` follows `$LANG`/`$LC_ALL` (Chinese locales get
+	 * Chinese, everything else English).
+	 */
+	lang: Lang | "auto";
 }
 
 export const DEFAULT_CONFIG: KegelConfig = {
@@ -74,71 +83,51 @@ export const DEFAULT_CONFIG: KegelConfig = {
 	log: true,
 	askRating: true,
 	historyDays: 14,
+	lang: "auto",
 };
 
 export interface Preset {
 	id: string;
-	name: string;
-	detail: string;
 	workout: Pick<KegelConfig, "contractSec" | "relaxSec" | "reps" | "sets" | "setRestSec">;
 }
 
 export const PRESETS: Preset[] = [
 	{
 		id: "standard",
-		name: "标准 10/10",
-		detail: "收缩 10s · 放松 10s · 8 次 × 3 组（约 9 分钟）",
 		workout: { contractSec: 10, relaxSec: 10, reps: 8, sets: 3, setRestSec: 30 },
 	},
 	{
 		id: "beginner",
-		name: "入门 5/5",
-		detail: "收缩 5s · 放松 5s · 8 次 × 2 组（约 3 分钟）",
 		workout: { contractSec: 5, relaxSec: 5, reps: 8, sets: 2, setRestSec: 30 },
 	},
 	{
 		id: "endurance",
-		name: "耐力 10/5",
-		detail: "收缩 10s · 放松 5s · 10 次 × 3 组（约 8 分钟）",
 		workout: { contractSec: 10, relaxSec: 5, reps: 10, sets: 3, setRestSec: 30 },
 	},
 	{
 		id: "strength",
-		name: "力量 15/10",
-		detail: "收缩 15s · 放松 10s · 6 次 × 2 组（约 6 分钟）",
 		workout: { contractSec: 15, relaxSec: 10, reps: 6, sets: 2, setRestSec: 40 },
 	},
 	{
 		id: "quick",
-		name: "快肌 1/1",
-		detail: "快速收缩 1s · 放松 1s · 20 次 × 3 组（约 3 分钟）",
 		workout: { contractSec: 1, relaxSec: 1, reps: 20, sets: 3, setRestSec: 30 },
 	},
 	{
 		id: "endless",
-		name: "无限循环 10/10",
-		detail: "收缩 10s · 放松 10s · 一直循环（手动结束）",
 		workout: { contractSec: 10, relaxSec: 10, reps: 0, sets: 0, setRestSec: 30 },
 	},
 ];
 
-export const PHASE_LABEL: Record<Phase, string> = {
-	idle: "待机",
-	prepare: "准备",
-	contract: "收缩",
-	relax: "放松",
-	setRest: "组间休息",
-	done: "完成",
-};
+/** Phase names for the given language. */
+export function phaseLabel(lang: Lang, phase: Phase): string {
+	return t(lang).phase[phase];
+}
 
-export const PHASE_HINT: Record<Phase, string> = {
-	idle: "",
-	prepare: "坐直，找到盆底肌的位置",
-	contract: "向上提紧，保持",
-	relax: "完全松开，别憋气",
-	setRest: "深呼吸，放松全身",
-	done: "训练完成，辛苦了",
-};
+/** One-line coaching hint for the phase (idle has none). */
+export function phaseHint(lang: Lang, phase: Phase): string | undefined {
+	if (phase === "idle") return undefined;
+	return t(lang).phaseHint[phase];
+}
 
 export interface PhaseChange {
 	from: Phase;
@@ -182,6 +171,10 @@ export function sanitize(config: Partial<KegelConfig>): KegelConfig {
 		log: config.log ?? DEFAULT_CONFIG.log,
 		askRating: config.askRating ?? DEFAULT_CONFIG.askRating,
 		historyDays: clampInt(config.historyDays, 3, 60, DEFAULT_CONFIG.historyDays),
+		lang:
+			config.lang === "zh" || config.lang === "en" || config.lang === "auto"
+				? config.lang
+				: DEFAULT_CONFIG.lang,
 	};
 }
 
@@ -209,9 +202,7 @@ export function formatClock(ms: number): string {
 }
 
 export function formatPlan(config: KegelConfig): string {
-	const reps = config.reps === 0 ? "∞" : String(config.reps);
-	const sets = config.sets === 0 ? "∞" : String(config.sets);
-	return `${config.contractSec}s/${config.relaxSec}s · ${reps} 次 × ${sets} 组`;
+	return formatPlanIn(resolveLang(config.lang), config);
 }
 
 /** Rough duration estimate in ms. Returns undefined for endless plans. */

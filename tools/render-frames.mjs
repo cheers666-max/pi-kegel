@@ -6,7 +6,7 @@
  * that emits ANSI SGR codes, so the demo GIF can never drift from shipping
  * code. Output: `tools/frames.json`, consumed by `tools/make-assets.py`.
  *
- * Usage:  node tools/render-frames.mjs [--config '<json>'] [--cols 100] [--rows 42]
+ * Usage:  node tools/render-frames.mjs [--lang zh|en] [--config '<json>'] [--cols 100] [--rows 42]
  */
 import { mkdirSync, existsSync, symlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
@@ -75,6 +75,7 @@ ensurePiTui();
 const { KegelEngine, estimateDuration } = await import(join(ROOT, "core.ts"));
 const { KegelWidget } = await import(join(ROOT, "widget.ts"));
 const { historyReport } = await import(join(ROOT, "history.ts"));
+const { t, presetNames } = await import(join(ROOT, "i18n.ts"));
 
 // ── mock theme: maps semantic names to the 256-colour palette used below ──────
 const PALETTE = {
@@ -99,6 +100,14 @@ const CONFIG = arg("config", null)
 	? JSON.parse(arg("config", "{}"))
 	: { prepareSec: 3, contractSec: 5, relaxSec: 5, reps: 2, sets: 1, setRestSec: 5 };
 
+/** `zh` (default) or `en` - picks both the UI copy and the output file names. */
+const LANG = arg("lang", "zh");
+if (LANG !== "zh" && LANG !== "en") {
+	console.error(`--lang must be "zh" or "en", got "${LANG}"`);
+	process.exit(1);
+}
+const TEXT = t(LANG);
+
 const COLS = Number(arg("cols", 100));
 const ROWS = Number(arg("rows", 42));
 // 300ms keeps the bloom transition smooth (≈4 samples through it) while
@@ -112,6 +121,7 @@ const widget = new KegelWidget(
 	() => true, // pretend the agent is busy, so the header matches a real run
 	() => ROWS,
 	() => "bloom",
+	() => LANG,
 );
 
 engine.start();
@@ -124,14 +134,14 @@ while (elapsed <= total) {
 	frames.push({
 		ms: elapsed,
 		phase: engine.phase,
-		label: `${engine.config.contractSec}s 收缩 / ${engine.config.relaxSec}s 放松`,
+		label: `${engine.config.contractSec}s ${TEXT.phase.contract} / ${engine.config.relaxSec}s ${TEXT.phase.relax}`,
 		lines,
 	});
 	engine.advance(STEP_MS);
 	elapsed += STEP_MS;
 }
 // final resting frame
-frames.push({ ms: total, phase: engine.phase, label: "完成", lines: widget.render(COLS) });
+frames.push({ ms: total, phase: engine.phase, label: TEXT.phase.done, lines: widget.render(COLS) });
 
 // ── the /kegel -> 训练记录 panel, with a plausible two-week log ─────────────
 // `at` values are relative to now so the screenshot always shows a live streak.
@@ -160,21 +170,26 @@ for (const [days, sessions, rating] of SAMPLE) {
 			end: "done",
 			// vary the second session of a day a little, so the report shows a range
 			...(rating === undefined ? {} : { rating: Math.max(1, rating - (i > 0 ? 1 : 0)) }),
-			...(days === 1 ? { note: "昨晚睡得好，明显更稳" } : {}),
+			...(days === 1
+				? { note: LANG === "en" ? "slept well, much steadier" : "昨晚睡得好，明显更稳" }
+				: {}),
 		});
 	}
 }
-const report = historyReport(theme, sampleLog, Date.now(), 14);
+const report = historyReport(theme, sampleLog, Date.now(), 14, LANG);
 
 mkdirSync(HERE, { recursive: true });
+// One frames file per language, so `make-assets.py --lang en` can rebuild the
+// English screenshots without clobbering the Chinese ones.
+const FRAMES_FILE = LANG === "en" ? "frames.en.json" : "frames.json";
 writeFileSync(
-	join(HERE, "frames.json"),
+	join(HERE, FRAMES_FILE),
 	JSON.stringify({ cols: COLS, rows: ROWS, stepMs: STEP_MS, config: CONFIG, frames, report }, null, 1),
 );
 
 const phases = frames.reduce((acc, f) => ({ ...acc, [f.phase]: (acc[f.phase] ?? 0) + 1 }), {});
 console.log(
-	`${frames.length} 帧 → tools/frames.json  (${(total / 1000).toFixed(1)}s, ${Object.entries(phases)
+	`${frames.length} 帧 → tools/${FRAMES_FILE} [${LANG}]  (${(total / 1000).toFixed(1)}s, ${Object.entries(phases)
 		.map(([k, v]) => `${k}:${v}`)
 		.join(" ")})`,
 );

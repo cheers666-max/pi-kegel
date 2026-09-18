@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Turn `tools/frames.json` into the README assets.
+Turn `tools/frames.json` (zh) or `tools/frames.en.json` (en) into README assets.
 
 Renders each frame exactly like a terminal would: monospace cell grid, ANSI SGR
 colours, wide (CJK) glyphs occupying two cells, Braille drawn by Menlo.
 
-Outputs:
+Outputs (the `en` run suffixes everything with `.en`):
     assets/demo.gif          - one loop of the workout
     assets/contract.png      - hero still: mid-contraction
     assets/relax.png         - hero still: relaxed / open
-    assets/menu.png          - the /kegel -> 训练记录 report
+    assets/menu.png          - the /kegel -> training log report
 
-Usage: python3 tools/make-assets.py [--scale 2]
+Usage: python3 tools/make-assets.py [--lang zh|en] [--scale 2]
 """
 import json
 import re
@@ -29,6 +29,15 @@ ASSETS = ROOT / "assets"
 SCALE = 2
 COLORS = 32
 SPEED = 1.0
+LANG = "zh"
+if "--lang" in sys.argv:
+    LANG = sys.argv[sys.argv.index("--lang") + 1]
+if LANG not in ("zh", "en"):
+    raise SystemExit(f'--lang must be "zh" or "en", got "{LANG}"')
+# The English run writes the same assets with an `.en` suffix, so both READMEs
+# can show their own language without either overwriting the other.
+SUFFIX = "" if LANG == "zh" else ".en"
+FRAMES_FILE = "frames.json" if LANG == "zh" else "frames.en.json"
 if "--scale" in sys.argv:
     SCALE = float(sys.argv[sys.argv.index("--scale") + 1])
 if "--colors" in sys.argv:
@@ -263,8 +272,7 @@ def cell_len(line: str) -> int:
 
 
 def load_frames():
-    data = json.loads((TOOLS / "frames.json").read_text())
-    return data
+    return json.loads((TOOLS / FRAMES_FILE).read_text())
 
 
 def build_gif(data, out: Path, delay_ms: int, scale_step: int = 1, colors: int = 64):
@@ -298,19 +306,21 @@ def pick_frame(data, phase: str, fraction: float):
 def main():
     ASSETS.mkdir(exist_ok=True)
     data = load_frames()
-    print(f"cell {CELL_W}x{CELL_H}px, font {FONT_SIZE}px, scale {SCALE}")
+    print(f"[{LANG}] cell {CELL_W}x{CELL_H}px, font {FONT_SIZE}px, scale {SCALE}")
 
+    app = "Kegel trainer" if LANG == "en" else "凯格尔训练"
     # hero stills
     for phase, fraction, name in [("contract", 0.85, "contract"), ("relax", 0.9, "relax")]:
         frame = pick_frame(data, phase, fraction)
-        img = frame_image(frame["lines"], title=f"pi · 凯格尔训练 · {frame['phase']}")
-        img.save(ASSETS / f"{name}.png")
-        print(f"  assets/{name}.png  {img.width}x{img.height}")
+        img = frame_image(frame["lines"], title=f"pi · {app} · {frame['phase']}")
+        img.save(ASSETS / f"{name}{SUFFIX}.png")
+        print(f"  assets/{name}{SUFFIX}.png  {img.width}x{img.height}")
 
     if data.get("report"):
-        img = frame_image(data["report"], title="pi · /kegel → 📈 训练记录")
-        img.save(ASSETS / "menu.png")
-        print(f"  assets/menu.png   {img.width}x{img.height}")
+        title = "pi · /kegel → 📈 training log" if LANG == "en" else "pi · /kegel → 📈 训练记录"
+        img = frame_image(data["report"], title=title)
+        img.save(ASSETS / f"menu{SUFFIX}.png")
+        print(f"  assets/menu{SUFFIX}.png   {img.width}x{img.height}")
 
     # GIF: sample every 400ms of workout time, play back at 90ms/frame (~4.4x)
     if MISSING:
@@ -319,13 +329,14 @@ def main():
     # the wall clock, or the demo lies about the pacing. `--speed` is only for
     # making a deliberately faster preview.
     gif_delay = round(data["stepMs"] / SPEED)
-    count = build_gif(data, ASSETS / "demo.gif", delay_ms=gif_delay, colors=COLORS)
-    size_kb = (ASSETS / "demo.gif").stat().st_size / 1024
+    gif_name = f"demo{SUFFIX}.gif"
+    count = build_gif(data, ASSETS / gif_name, delay_ms=gif_delay, colors=COLORS)
+    size_kb = (ASSETS / gif_name).stat().st_size / 1024
     workout_ms = data["frames"][-1]["ms"]
     play_s = count * gif_delay / 1000
     ratio = (workout_ms / 1000) / play_s
     speed = "1:1 真实速度" if abs(ratio - 1) < 0.05 else f"{ratio:.2f}x 速"
-    print(f"  assets/demo.gif   {count} frames  {size_kb:.0f} KB  ({play_s:.1f}s 循环，{speed})")
+    print(f"  assets/{gif_name}   {count} frames  {size_kb:.0f} KB  ({play_s:.1f}s loop, {speed})")
 
 
 if __name__ == "__main__":

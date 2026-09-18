@@ -4,7 +4,22 @@
  */
 
 import assert from "node:assert/strict";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { bloomForPhase, renderBloom } from "./bloom.ts";
+import {
+	DEFAULT_LANG,
+	STRINGS,
+	type Strings,
+	formatPlanIn,
+	nextLang,
+	presetLabelIn,
+	resolveLang,
+	resolveVoice,
+} from "./i18n.ts";
 import {
 	type HistoryEntry,
 	appendEntry,
@@ -22,15 +37,55 @@ import {
 import {
 	DEFAULT_CONFIG,
 	KegelEngine,
+	PRESETS,
 	configFromPreset,
 	estimateDuration,
 	formatClock,
+	phaseHint,
+	phaseLabel,
 	presetIdFor,
 	sanitize,
 	type Phase,
 } from "./core.ts";
 
 let passed = 0;
+/**
+ * `widget.ts` imports `@earendil-works/pi-tui`, which exists wherever pi is
+ * installed but not next to this file. Point node at it so the widget test can
+ * run from the extension directory *and* from a checkout.
+ */
+function ensurePiTui(): void {
+	const target = join(dirname(fileURLToPath(import.meta.url)), "node_modules", "@earendil-works", "pi-tui");
+	if (existsSync(target)) return;
+	const local = (cmd: string): string => {
+		try {
+			return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		} catch {
+			return "";
+		}
+	};
+	const roots: string[] = [];
+	if (process.env.PI_GLOBAL_ROOT) roots.push(process.env.PI_GLOBAL_ROOT);
+	const npmRoot = local("npm root -g");
+	if (npmRoot && !npmRoot.includes("\n")) roots.push(npmRoot);
+	const piBin = local("which pi");
+	if (piBin && !piBin.includes("\n")) {
+		roots.push(join(dirname(dirname(piBin)), "lib", "node_modules"));
+	}
+	// pi pulls pi-tui in as a dependency, so look both at the top level and inside pi itself.
+	const found = roots
+		.flatMap((root) => [
+			join(root, "@earendil-works", "pi-tui"),
+			join(root, "remote-pi", "node_modules", "@earendil-works", "pi-tui"),
+		])
+		.find((candidate) => existsSync(candidate));
+	if (!found) return;
+	mkdirSync(dirname(target), { recursive: true });
+	symlinkSync(realpathSync(found), target, "dir");
+}
+
+ensurePiTui();
+
 function test(name: string, fn: () => void): void {
 	try {
 		fn();
@@ -487,4 +542,194 @@ test("history: report never emits an empty day bar", () => {
 	const lines = historyReport(theme, [entryAt(0)], noon(0), 3);
 	const empty = lines.filter((l) => /^\d\d-\d\d/.test(l) && !l.includes("█"));
 	assert.equal(empty.length, 2, "two empty days, drawn as dots");
+});
+
+// ── i18n ────────────────────────────────────────────────────────────────────
+
+test("i18n: both languages define exactly the same keys", () => {
+	const zhKeys = Object.keys(STRINGS.zh).sort();
+	const enKeys = Object.keys(STRINGS.en).sort();
+	assert.deepEqual(enKeys, zhKeys, "zh and en must not drift apart");
+	assert.ok(zhKeys.length > 80, `expected a full table, got ${zhKeys.length} keys`);
+});
+
+test("i18n: every leaf has the same type in both languages", () => {
+	for (const key of Object.keys(STRINGS.zh) as Array<keyof Strings>) {
+		assert.equal(
+			typeof STRINGS.en[key],
+			typeof STRINGS.zh[key],
+			`${key} is a ${typeof STRINGS.zh[key]} in zh but a ${typeof STRINGS.en[key]} in en`,
+		);
+	}
+});
+
+test("i18n: presets are translated in both languages", () => {
+	for (const preset of PRESETS) {
+		assert.ok(STRINGS.zh.presetNames[preset.id], `zh name for ${preset.id}`);
+		assert.ok(STRINGS.en.presetNames[preset.id], `en name for ${preset.id}`);
+		assert.ok(STRINGS.zh.presetDetails[preset.id], `zh detail for ${preset.id}`);
+		assert.ok(STRINGS.en.presetDetails[preset.id], `en detail for ${preset.id}`);
+		assert.ok(presetLabelIn("zh", preset.id).includes(STRINGS.zh.presetNames[preset.id]), "zh label");
+		assert.ok(presetLabelIn("en", preset.id).includes(STRINGS.en.presetNames[preset.id]), "en label");
+	}
+});
+
+test("i18n: every phase is named and hinted in both languages", () => {
+	const phases: Phase[] = ["idle", "prepare", "contract", "relax", "setRest", "done"];
+	for (const phase of phases) {
+		assert.ok(phaseLabel("zh", phase), `zh label for ${phase}`);
+		assert.ok(phaseLabel("en", phase), `en label for ${phase}`);
+	}
+	for (const phase of phases.filter((p) => p !== "idle")) {
+		assert.ok(phaseHint("zh", phase), `zh hint for ${phase}`);
+		assert.ok(phaseHint("en", phase), `en hint for ${phase}`);
+	}
+	assert.equal(phaseHint("en", "idle"), undefined, "idle has no hint");
+});
+
+test("i18n: the English table contains no Chinese characters", () => {
+	const cjk = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/;
+	const walk = (value: unknown, path: string): void => {
+		if (typeof value === "string") {
+			assert.ok(!cjk.test(value), `English string at ${path} still contains CJK: ${value}`);
+			return;
+		}
+		if (typeof value === "function") {
+			// Call it with representative arguments so interpolated copy is checked too.
+			const out = (value as (...args: unknown[]) => unknown)(1, 2, 3, 4);
+			if (typeof out === "string") walk(out, `${path}()`);
+			return;
+		}
+		if (value && typeof value === "object") {
+			for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+		}
+	};
+	walk(STRINGS.en, "en");
+});
+
+test("i18n: interpolated strings actually interpolate", () => {
+	assert.ok(STRINGS.en.historyStreakValue(5).includes("5"), "streak value");
+	assert.ok(STRINGS.zh.historyStreakValue(5).includes("5"), "streak value zh");
+	assert.match(STRINGS.en.widgetRepSet(2, 8, 1, 3), /2.*8.*1.*3/, "rep/set counter");
+	assert.match(STRINGS.zh.widgetRepSet(2, 8, 1, 3), /2.*8.*1.*3/, "rep/set counter zh");
+	assert.ok(STRINGS.en.notifyLevelSet("Strength", "10s/10s", " (~5 min)").includes("Strength"), "level name");
+	assert.equal(STRINGS.en.historyStreakValue(1), "1 day", "singular day");
+	assert.equal(STRINGS.en.historyStreakValue(3), "3 days", "plural days");
+});
+
+test("i18n: English counts are pluralized", () => {
+	const en = STRINGS.en;
+	assert.equal(en.historyReps(1), "1 rep", "singular rep");
+	assert.equal(en.historyReps(2), "2 reps", "plural reps");
+	assert.equal(en.historySessions(1), "1 session", "singular session");
+	assert.equal(en.historySessions(0), "0 sessions", "zero is plural");
+	assert.equal(en.historyStreakValue(1), "1 day", "singular day");
+	assert.equal(en.widgetDone(1, "0:10"), "1 rep · 0:10 under tension", "widget done singular");
+	assert.equal(en.widgetDone(24, "4:00"), "24 reps · 4:00 under tension", "widget done plural");
+	assert.ok(!en.todaySuffix(1, 1, "0:10").includes("1 reps"), "today suffix plural");
+	assert.ok(!en.statusToday(1, 1, "0:10").includes("1 reps"), "status today plural");
+	assert.ok(!en.statusLog(1, 6, "4.0").includes("1 sessions"), "status log plural");
+	// The plan carries the per-set prescription; the summary adds the session total.
+	const summary = en.summary("10s/10s · 8 reps × 3 sets", 24, "4:00");
+	assert.ok(!summary.includes("24 reps ·"), `summary plural bug: ${summary}`);
+	assert.match(summary, /24 reps total/, `summary should label the session total: ${summary}`);
+	assert.match(summary, /8 reps × 3 sets/, "summary keeps the prescription");
+});
+
+test("i18n: every count-bearing English string pluralizes via the shared helper", () => {
+	// A missing pluralization shows up as "1 reps" / "1 sessions" / "1 days" etc.
+	const offenders: string[] = [];
+	const walk = (value: unknown, path: string): void => {
+		const call = (args: unknown[]): void => {
+			const out = (value as (...a: unknown[]) => unknown)(...args);
+			if (typeof out === "string" && /(^|\D)1 (reps|sessions|days|sets|minutes)\b/.test(out)) {
+				offenders.push(`${path} -> ${out}`);
+			}
+		};
+		if (typeof value === "function") {
+			call([1, 1, 1, 1]);
+			call([1, "0:10", "1/1", 1]);
+			return;
+		}
+		if (value && typeof value === "object") {
+			for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+		}
+	};
+	walk(STRINGS.en, "en");
+	assert.deepEqual(offenders, [], `unpluralized English counts: ${offenders.join(" | ")}`);
+});
+
+test("i18n: language resolution and cycling", () => {
+	assert.equal(resolveLang("zh"), "zh");
+	assert.equal(resolveLang("en"), "en");
+	assert.equal(resolveLang("auto", { LANG: "zh_CN.UTF-8" } as NodeJS.ProcessEnv), "zh");
+	assert.equal(resolveLang("auto", { LANG: "en_US.UTF-8" } as NodeJS.ProcessEnv), "en");
+	assert.equal(resolveLang("auto", { LC_ALL: "zh_TW.UTF-8", LANG: "en_US.UTF-8" } as NodeJS.ProcessEnv), "zh");
+	assert.equal(resolveLang("auto", {} as NodeJS.ProcessEnv), DEFAULT_LANG, "no locale -> default");
+	assert.equal(nextLang("zh"), "en", "zh cycles to en");
+	assert.equal(nextLang("en"), "zh", "en cycles back to zh");
+});
+
+test("i18n: the plan string is localized", () => {
+	const config = { ...DEFAULT_CONFIG, contractSec: 10, relaxSec: 10, reps: 8, sets: 3, setRestSec: 30 };
+	const zh = formatPlanIn("zh", config);
+	const en = formatPlanIn("en", config);
+	assert.ok(/[\u4e00-\u9fff]/.test(zh), `zh plan should use Chinese units: ${zh}`);
+	assert.ok(!/[\u4e00-\u9fff]/.test(en), `en plan should be pure English: ${en}`);
+	assert.match(en, /10s/, "en plan keeps the numbers");
+	assert.match(zh, /10/, "zh plan keeps the numbers");
+});
+
+test("i18n: the training report renders in English", () => {
+	const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+	const lines = historyReport(theme, [entryAt(0, { rating: 4 })], noon(0), 4, "en");
+	const text = lines.join("\n");
+	assert.ok(!/[\u4e00-\u9fff]/.test(text), `English report still has Chinese:\n${text}`);
+	assert.ok(lines.length > 4, "report has content");
+	assert.ok(text.includes(STRINGS.en.historyRecent), "recent section translated");
+	assert.match(text, /\d\d-\d\d/, "day rows still render");
+});
+
+test("i18n: language is part of the sanitized config", () => {
+	assert.equal(sanitize({ lang: "en" }).lang, "en");
+	assert.equal(sanitize({ lang: "zh" }).lang, "zh");
+	assert.equal(sanitize({ lang: "auto" }).lang, "auto");
+	assert.equal(sanitize({ lang: "fr" as never }).lang, DEFAULT_CONFIG.lang, "unknown language falls back");
+});
+
+test("i18n: the spoken voice follows the language unless overridden", () => {
+	assert.equal(resolveVoice("zh", ""), "Tingting", "zh default voice");
+	assert.equal(resolveVoice("en", ""), "Samantha", "en default voice");
+	assert.equal(resolveVoice("en", "   "), "Samantha", "blank counts as unset");
+	assert.equal(resolveVoice("en", "Daniel"), "Daniel", "an explicit voice wins");
+	assert.equal(resolveVoice("zh", "Daniel"), "Daniel", "even against the language default");
+});
+
+test("i18n: the widget renders the same phase differently per language", async () => {
+	const { KegelWidget } = await import("./widget.ts");
+	const engine = new KegelEngine({ ...DEFAULT_CONFIG, prepareSec: 0 });
+	engine.start();
+	engine.advance(1500); // well into the first contraction
+	const render = (l: "zh" | "en") =>
+		new KegelWidget(
+			engine,
+			// only fg/bold/name are read by the renderer, so a partial theme is fine
+			() => ({ fg: (_c: string, t: string) => t, bold: (t: string) => t, name: "t" }) as unknown as Theme,
+			() => false,
+			() => 40,
+			() => "bloom",
+			() => l,
+		)
+			.render(100)
+			.join("\n");
+	const zh = render("zh");
+	const en = render("en");
+	assert.ok(zh.includes("收缩"), "zh widget uses 收缩");
+	assert.ok(!zh.includes("CONTRACT"), "zh widget has no English headline");
+	assert.ok(en.includes("CONTRACT"), "en widget uses CONTRACT");
+	assert.ok(!en.includes("收缩"), "en widget has no Chinese");
+	assert.ok(zh.includes("凯格尔训练") && en.includes("Kegel trainer"), "titles translated");
+	// the flower itself is language-independent
+	const flowers = (text: string) => text.split("\n").filter((l) => /[\u2800-\u28ff]/.test(l)).length;
+	assert.equal(flowers(zh), flowers(en), "the flower occupies the same rows in both languages");
 });

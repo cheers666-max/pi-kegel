@@ -12,7 +12,16 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { bloomForPhase, renderBloom } from "./bloom.ts";
-import { type KegelEngine, PHASE_HINT, PHASE_LABEL, PRESETS, formatClock, formatPlan, presetIdFor } from "./core.ts";
+import {
+	type KegelEngine,
+	type Lang,
+	formatClock,
+	formatPlan,
+	phaseLabel,
+	phaseHint,
+	presetIdFor,
+} from "./core.ts";
+import { DEFAULT_LANG, formatPlanIn, resolveLang, t } from "./i18n.ts";
 
 export const WIDGET_KEY = "kegel-trainer";
 
@@ -51,9 +60,11 @@ function center(text: string, width: number): string {
 	return fit(" ".repeat(pad) + text, width);
 }
 
-function planLabel(engine: KegelEngine): string {
-	const preset = PRESETS.find((item) => item.id === presetIdFor(engine.config));
-	return preset ? preset.name : formatPlan(engine.config);
+function planLabel(engine: KegelEngine, lang: Lang): string {
+	const presetId = presetIdFor(engine.config);
+	// A preset gets its short name; a custom plan gets the full plan string.
+	if (presetId && t(lang).presetNames[presetId]) return t(lang).presetNames[presetId];
+	return formatPlanIn(lang, engine.config);
 }
 
 export class KegelWidget {
@@ -62,6 +73,7 @@ export class KegelWidget {
 	private isAgentBusy: () => boolean;
 	private getRows: () => number;
 	private getVisualMode: () => VisualMode;
+	private getLang: () => Lang;
 	private cachedLines: string[] = [];
 	private cachedWidth = 0;
 	private cacheKey = "";
@@ -72,12 +84,14 @@ export class KegelWidget {
 		isAgentBusy: () => boolean,
 		getRows: () => number = () => 40,
 		getVisualMode: () => VisualMode = () => "bloom",
+		getLang: () => Lang = () => DEFAULT_LANG,
 	) {
 		this.engine = engine;
 		this.getTheme = getTheme;
 		this.isAgentBusy = isAgentBusy;
 		this.getRows = getRows;
 		this.getVisualMode = getVisualMode;
+		this.getLang = getLang;
 	}
 
 	invalidate(): void {
@@ -111,6 +125,7 @@ export class KegelWidget {
 			// Sub-second bucket so the bloom animates smoothly between ticks.
 			visual === "bloom" ? Math.floor(this.phaseElapsedMs / 90) : 0,
 			this.isAgentBusy() ? "busy" : "idle",
+			this.getLang(),
 			theme.name ?? "",
 		].join("|");
 		if (width === this.cachedWidth && cacheKey === this.cacheKey) return this.cachedLines;
@@ -140,8 +155,8 @@ export class KegelWidget {
 		push(theme.fg("dim", "─".repeat(inner)));
 
 		const title =
-			`${theme.fg("accent", "🧘")} ${theme.bold(theme.fg("text", "凯格尔训练"))}` +
-			theme.fg("muted", ` · ${planLabel(engine)}`);
+			`${theme.fg("accent", "🧘")} ${theme.bold(theme.fg("text", t(this.getLang()).appTitleText))}` +
+			theme.fg("muted", ` · ${planLabel(engine, this.getLang())}`);
 		const clockRight = `${theme.fg("muted", "⏱ ")}${theme.fg("accent", formatClock(engine.elapsedMs))}`;
 		push(row(title, clockRight, inner));
 
@@ -219,9 +234,9 @@ export class KegelWidget {
 		return {
 			color,
 			text,
-			hint: theme.fg("dim", PHASE_HINT[engine.phase] || "…"),
+			hint: theme.fg("dim", phaseHint(this.getLang(), engine.phase) ?? "…"),
 			counter: engine.finished
-				? theme.fg("success", `共 ${engine.completedReps} 次 · 收缩 ${formatClock(engine.totalContractMs)}`)
+				? theme.fg("success", t(this.getLang()).widgetDone(engine.completedReps, formatClock(engine.totalContractMs)))
 				: this.counter(theme),
 			countdown,
 			bar: this.bar(theme, Math.min(width, 40), color),
@@ -249,8 +264,8 @@ export class KegelWidget {
 		push(theme.fg("dim", "─".repeat(inner)));
 
 		const title =
-			`${theme.fg("accent", "🧘")} ${theme.bold(theme.fg("text", "凯格尔训练"))}` +
-			theme.fg("muted", ` · ${planLabel(engine)}`);
+			`${theme.fg("accent", "🧘")} ${theme.bold(theme.fg("text", t(this.getLang()).appTitleText))}` +
+			theme.fg("muted", ` · ${planLabel(engine, this.getLang())}`);
 		const clockRight = `${theme.fg("muted", "⏱ ")}${theme.fg("accent", formatClock(engine.elapsedMs))}`;
 		push(row(title, clockRight, inner));
 
@@ -287,63 +302,62 @@ export class KegelWidget {
 	private phaseHeadline(theme: Theme, withHint = true): { color: PhaseColor; text: string } {
 		const engine = this.engine;
 		const hint = (text: string) => (withHint ? theme.fg("dim", ` · ${text}`) : "");
+		const s = t(this.getLang());
 		if (engine.finished) {
-			return { color: "success", text: theme.bold(theme.fg("success", "✅ 完成")) };
+			return { color: "success", text: theme.bold(theme.fg("success", s.headline.done)) };
 		}
 		if (engine.paused) {
 			return {
 				color: "muted",
-				text: `${theme.bold(theme.fg("warning", "⏸ 暂停"))}${hint(PHASE_LABEL[engine.phase])}`,
+				text: `${theme.bold(theme.fg("warning", s.headline.paused))}${hint(phaseLabel(this.getLang(), engine.phase))}`,
 			};
 		}
 		switch (engine.phase) {
 			case "contract":
 				return {
 					color: "warning",
-					text: `${theme.bold(theme.fg("warning", "▲ 收缩 HOLD"))}${hint("向上提紧，别憋气")}`,
+					text: `${theme.bold(theme.fg("warning", s.headline.contract))}${hint(s.shortHint.contract)}`,
 				};
 			case "relax":
 				return {
 					color: "success",
-					text: `${theme.bold(theme.fg("success", "▽ 放松"))}${hint("完全松开")}`,
+					text: `${theme.bold(theme.fg("success", s.headline.relax))}${hint(s.shortHint.relax)}`,
 				};
 			case "setRest":
 				return {
 					color: "accent",
-					text: `${theme.bold(theme.fg("accent", "≡ 组间休息"))}${hint("深呼吸")}`,
+					text: `${theme.bold(theme.fg("accent", s.headline.setRest))}${hint(s.shortHint.setRest)}`,
 				};
 			case "prepare":
 				return {
 					color: "accent",
-					text: `${theme.bold(theme.fg("accent", "● 准备"))}${hint("找到盆底肌")}`,
+					text: `${theme.bold(theme.fg("accent", s.headline.prepare))}${hint(s.shortHint.prepare)}`,
 				};
 			default:
-				return { color: "muted", text: theme.fg("muted", PHASE_LABEL[engine.phase]) };
+				return { color: "muted", text: theme.fg("muted", phaseLabel(this.getLang(), engine.phase)) };
 		}
 	}
 
 	private counter(theme: Theme): string {
 		const engine = this.engine;
-		const rep = engine.config.reps === 0 ? "∞" : String(engine.config.reps);
-		const set = engine.config.sets === 0 ? "∞" : String(engine.config.sets);
-		const parts: string[] = [];
+		const reps = engine.config.reps === 0 ? "∞" : String(engine.config.reps);
+		const sets = engine.config.sets === 0 ? "∞" : String(engine.config.sets);
+		const s = t(this.getLang());
 		if (engine.phase === "contract" || engine.phase === "relax" || engine.phase === "prepare") {
-			parts.push(`第 ${engine.rep}/${rep} 次`);
+			return theme.fg("muted", s.widgetRepSet(engine.rep, reps, engine.set, sets));
 		}
-		parts.push(`第 ${engine.set}/${set} 组`);
-		return theme.fg("muted", parts.join(" · "));
+		// prepare/setRest/done only show the set counter
+		return theme.fg("muted", s.setCounter(engine.set, sets));
 	}
 
 	private statusLine(theme: Theme): string {
 		const engine = this.engine;
+		const s = t(this.getLang());
 		if (engine.finished) {
-			return theme.fg(
-				"success",
-				`共 ${engine.completedReps} 次 · 累计收缩 ${formatClock(engine.totalContractMs)}`,
-			);
+			return theme.fg("success", s.widgetDone(engine.completedReps, formatClock(engine.totalContractMs)));
 		}
 		if (engine.paused) {
-			return `${theme.fg("warning", "⏸ 已暂停")}${theme.fg("dim", " · alt+k 继续")}`;
+			return theme.fg("warning", s.pausedLine("alt+k"));
 		}
 		return "";
 	}
@@ -353,14 +367,15 @@ export class KegelWidget {
 		const engine = this.engine;
 		const key = (text: string) => theme.fg("accent", text);
 		const label = (text: string) => theme.fg("dim", text);
-		const toggle = !engine.running ? " 开始" : engine.paused ? " 继续" : " 暂停";
+		const s = t(this.getLang());
+		const toggle = !engine.running ? s.keyStart : engine.paused ? s.keyResume : s.keyPause;
 		const sep = label(" · ");
 
 		const full = [
 			`${key("alt+k")}${label(toggle)}`,
-			`${key("alt+n")}${label(" 跳过")}`,
-			`${key("alt+e")}${label(" 结束")}`,
-			`${key("/kegel")}${label(" 设置")}`,
+			`${key("alt+n")}${label(s.keySkip)}`,
+			`${key("alt+e")}${label(s.keyEnd)}`,
+			`${key("/kegel")}${label(s.keySettings)}`,
 		];
 		const medium = full.slice(0, 3);
 		const short = [`${key("alt+k")}${label(toggle)}`, `${key("alt+n")}`, `${key("alt+e")}`];
@@ -373,6 +388,7 @@ export class KegelWidget {
 	}
 }
 
-export function formatSummary(engine: KegelEngine): string {
-	return `${formatPlan(engine.config)} · 完成 ${engine.completedReps} 次 · 累计收缩 ${formatClock(engine.totalContractMs)}`;
+export function formatSummary(engine: KegelEngine, lang?: Lang): string {
+	const s = t(lang ?? resolveLang(engine.config.lang));
+	return s.summary(formatPlan(engine.config), engine.completedReps, formatClock(engine.totalContractMs));
 }

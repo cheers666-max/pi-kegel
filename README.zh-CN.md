@@ -14,6 +14,8 @@
 |---|---|
 | ![收缩](assets/contract.png) | ![放松](assets/relax.png) |
 
+界面语言支持**中文 / English 切换**：⚙️ 其它设置 → 「界面语言」，或者 `/kegel lang zh`；默认跟随系统 `$LANG` 自动判断。上面截图是中文界面。
+
 ---
 
 ## 为什么做这个
@@ -69,7 +71,7 @@ cd ~/.pi/agent/extensions/kegel && git pull
 
 每个阶段切换都有声音，不用盯屏幕：
 
-| 时刻 | 系统音 | 语音模式 |
+| 时刻 | 系统音 | 语音模式（中文） | 语音模式（English） |
 |------|--------|---------|
 | 准备开始 | `Morse` | 准备 |
 | 开始**收紧** | `Tink`（清脆、高） | 收紧 |
@@ -79,7 +81,7 @@ cd ~/.pi/agent/extensions/kegel && git pull
 | 完成 | `Glass`（铃） | 完成 |
 
 - **滴答**（默认最后 3 秒）：边界快到了提醒你，可以闭眼练。短于 3.5 秒的阶段不滴答（否则快肌 1/1 会变成哒哒哒噪音）
-- **语音模式**：用 macOS `say` 念（默认 `Tingting`），像教练在报数，适合闭眼跟练
+- **语音模式**：用 macOS `say` 念，音色跟着界面语言走（中文 `Tingting`、英文 `Samantha`），像教练在报数，适合闭眼跟练；也可以用 `voice` 配置项指定音色
 - **音量**：`afplay -v`，0-100%
 - 只在 **macOS** 上有效（依赖 `afplay` / `say`），其他平台静默
 
@@ -119,15 +121,15 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps)次"'
 
 ## 难度表
 
-| 难度 | 处方 | 说明 |
-|---|---|---|
-| 快肌 | 1s / 1s × 10 × 3 | 练快肌纤维，节奏很快 |
-| 入门 | 3s / 6s × 10 × 3 | 找不到发力感时从这个开始 |
-| 轻量 | 5s / 10s × 10 × 3 | |
-| **标准** | **10s / 10s × 8 × 3** | 默认，也是最常见的临床处方 |
-| 加强 | 10s / 5s × 10 × 3 | 放松时间短，强度更大 |
-| 耐力 | 15s / 10s × 8 × 3 | |
-| 自定义 | 任意 | 收缩 1-120s、放松 1-120s、次数、组数、组间休息 |
+| 难度 | 收缩 / 放松 | 次数 × 组数 | 组间休息 | 大概时长 |
+|---|---|---|---|---|
+| 快肌 1/1 | 1s / 1s | 20 × 3 | 30s | 3 分钟，练快肌纤维 |
+| 入门 5/5 | 5s / 5s | 8 × 2 | 30s | 3 分钟，找不到发力感时从这个开始 |
+| **标准 10/10** | **10s / 10s** | **8 × 3** | 30s | 9 分钟，默认，也是最常见的临床处方 |
+| 耐力 10/5 | 10s / 5s | 10 × 3 | 30s | 8 分钟，放松时间短，强度更大 |
+| 力量 15/10 | 15s / 10s | 6 × 2 | 40s | 6 分钟，长收缩 |
+| 无限循环 10/10 | 10s / 10s | ∞ | 30s | 一直循环，手动结束 |
+| 自定义 | 1-120s / 1-120s | 0-200 × 0-50 | 0-300s | 任意（次数或组数填 0 表示无限） |
 
 ## 配置
 
@@ -135,6 +137,7 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps)次"'
 
 | 项 | 默认 | 说明 |
 |---|---|---|
+| 界面语言 | 自动 | 跟随 `$LANG`，中文环境显示中文、其余英文；也可 `/kegel lang zh` / `en` / `auto` |
 | 音效 | 系统音 | `系统音`（含音量）→ `语音` → `关` |
 | 结束前滴答 | 最后 3 秒 | 0-10 秒或关 |
 | 可视化 | 花瓣绽放 | 或进度条 |
@@ -159,12 +162,13 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps)次"'
   "cue": "system",
   "volume": 0.7,
   "tickLastSec": 3,
-  "voice": "Tingting",
+  "voice": "",
   "visual": "bloom",
   "bloomOn": "relax",
   "log": true,
   "askRating": true,
-  "historyDays": 14
+  "historyDays": 14,
+  "lang": "auto"
 }
 ```
 
@@ -180,6 +184,7 @@ tail -7 ~/.pi/agent/kegel-history.jsonl | jq -r '"\(.at|todate) \(.reps)次"'
 | 打开菜单 | `/kegel` |
 | 直接开始某个难度 | `/kegel quick`、`/kegel standard` 等 |
 | 查看状态 | `/kegel status` |
+| 切换界面语言 | `/kegel lang en`（或 `zh` / `auto`；不带参数则中英循环） |
 
 **如果在 Ghostty / Terminal.app 下 `alt+k` 没反应**：这两个终端默认 `macos-option-as-alt = false`，Option+K 发出的是组合字符 `˚` 而不是 `ESC k`。扩展已经做了兜底 —— 训练期间它直接拦截 `˚` / `˜` / `´` 三个字符，所以**开箱即用，不用改终端配置**。
 
@@ -193,7 +198,6 @@ macos-option-as-alt = true
 
 ## 已知限制
 
-- **界面文案是中文**：组件文字、难度名、菜单、语音提示都是中文，跟练本身不需要认字（花的开合就表达了阶段），但目前没有 i18n 层
 - **音效仅 macOS**：依赖 `afplay` / `say`
 - **模型写超长回复时才开始练**：如果它只回一句话（几秒），训练刚开始就被下一轮打断 —— 这时 `模型空闲时自动暂停` 会把它冻住，等你下次发消息继续
 - **排队消息不触发重新开始**：agent 忙时你追加的消息属于同一个 run，扩展靠 `turn_start` 兜底重新武装（已测）
@@ -206,11 +210,11 @@ macos-option-as-alt = true
 三个纯逻辑模块都可以脱离 pi 独立跑：
 
 ```bash
-# 单元测试：状态机 + 呼吸曲线 + 点阵渲染 + 记录聚合（33 项）
+# 单元测试：状态机、呼吸曲线、点阵渲染、记录聚合、i18n 键对齐与单复数（47 项）
 node --experimental-strip-types core.test.ts
 
 # 重新生成 README 素材（需要装过 pi，脚本会自己找到 pi-tui）
-node --experimental-strip-types tools/render-frames.mjs   # 采样成帧（默认 300ms/帧）
+node --experimental-strip-types tools/render-frames.mjs   # 加 --lang en 生成英文版   # 采样成帧（默认 300ms/帧）
 python3 tools/make-assets.py                              # 画 PNG / 合成 GIF（真实速度）
 python3 tools/verify-assets.py                            # 无需肉眼：查缺字、查花真的在缩放
 ```
@@ -222,9 +226,10 @@ python3 tools/verify-assets.py                            # 无需肉眼：查�
 | `core.ts` | 状态机 + 配置校验（纯逻辑，零 TUI 依赖） |
 | `bloom.ts` | Braille 点阵花的几何与呼吸曲线（纯函数） |
 | `history.ts` | 训练记录的数据层 + 报表渲染（纯函数） |
+| `i18n.ts` | 全部界面文案（中英两套，纯函数） |
 | `widget.ts` | 把状态画成终端组件 |
 | `index.ts` | 扩展入口：事件订阅、快捷键、音效、菜单编排 |
-| `core.test.ts` | 单元测试 |
+| `core.test.ts` | 单元测试（含组件的中英文渲染） |
 
 `tools/` 里的脚本会加载**真实的** `widget.ts` / `bloom.ts` / `history.ts` 来出图，所以 README 里的截图不可能和实际渲染脱节。`verify-assets.py` 之所以存在，是因为出图踩过三个坑：Menlo 没有 Braille 字形（花静默变成方框）、量化后的 GIF 背景色会偏移（导致「非背景即墨迹」的判定失效）、以及动画可能根本不动的帧序列。
 

@@ -6,6 +6,8 @@
  * write. Aggregation (daily volume + how it felt) happens here.
  */
 
+import { DEFAULT_LANG, type Lang, t } from "./i18n.ts";
+
 export interface HistoryEntry {
 	/** Epoch ms when the session ended. */
 	at: number;
@@ -244,17 +246,9 @@ export function stars(rating: number | undefined): string {
 }
 
 /** Human label for a 1-5 score, used by the rating dialog and the report. */
-export const RATING_LABELS: Record<number, string> = {
-	1: "很差（疼痛 / 漏尿 / 完全使不上力）",
-	2: "偏差（找不到发力感）",
-	3: "一般（勉强完成）",
-	4: "不错（基本可控）",
-	5: "很好（有力、全程撑住）",
-};
-
-export function ratingLabel(rating: number | undefined): string {
-	if (rating === undefined) return "未评分";
-	return RATING_LABELS[Math.round(rating)] ?? `${rating}`;
+export function ratingLabel(lang: Lang, rating: number | undefined): string {
+	if (rating === undefined) return t(lang).historyUnrated;
+	return t(lang).ratingScale[Math.round(rating)] ?? String(rating);
 }
 
 // ── report rendering ────────────────────────────────────────────────────────
@@ -271,48 +265,53 @@ const BAR_CELLS = 18;
  * The `/kegel` → 训练记录 panel: today's volume, the streak, and one row per
  * day with a bar sized by contraction time. Pure - takes `now` explicitly.
  */
-export function historyReport(theme: ReportTheme, history: HistoryEntry[], now: number, days: number): string[] {
+export function historyReport(
+	theme: ReportTheme,
+	history: HistoryEntry[],
+	now: number,
+	days: number,
+	lang: Lang = DEFAULT_LANG,
+): string[] {
+	const str = t(lang);
 	if (history.length === 0) {
-		return [
-			theme.fg("muted", "还没有记录。完整练完一次就会自动记一笔，并问你「这次感觉如何」。"),
-			"",
-			theme.fg("dim", "提示：手动结束（alt+e）不算完成，不会记入。"),
-		];
+		return [theme.fg("muted", str.historyEmpty), "", theme.fg("dim", str.historyEmptyHint)];
 	}
 
 	const window = dayStats(history, now, days);
 	const all = totals(history, now);
 	const today = window[window.length - 1];
 	const lines: string[] = [];
+	const sep = theme.fg("dim", " · ");
 
-	const todayBits: string[] = [theme.fg("accent", `${today.sessions} 次`)];
+	const todayBits: string[] = [theme.fg("accent", str.historySessions(today.sessions))];
 	if (today.sessions > 0) {
-		todayBits.push(theme.fg("muted", `${today.reps} 个收缩`));
+		todayBits.push(theme.fg("muted", str.historyReps(today.reps)));
 		todayBits.push(theme.fg("muted", formatSpan(today.contractMs)));
 		if (today.rating !== undefined) {
 			todayBits.push(`${theme.fg("warning", stars(today.rating))} ${theme.fg("muted", today.rating.toFixed(1))}`);
 		}
 	}
-	lines.push(`${theme.bold("今日")}  ${todayBits.join(theme.fg("dim", " · "))}`);
-	if (today.sessions === 0) lines.push(theme.fg("dim", "        今天还没练，随时 /kegel 开始"));
+	lines.push(`${theme.bold(str.historyToday)}  ${todayBits.join(sep)}`);
+	if (today.sessions === 0) lines.push(theme.fg("dim", `        ${str.historyNoTrainingToday}`));
 
-	const streakText = all.streak > 0 ? theme.fg("success", `${all.streak} 天`) : theme.fg("dim", "0 天");
+	const streakText =
+		all.streak > 0 ? theme.fg("success", str.historyStreakValue(all.streak)) : theme.fg("dim", str.historyStreakValue(0));
 	const avg =
 		all.rating === undefined
-			? theme.fg("dim", "未评分")
+			? theme.fg("dim", str.historyUnrated)
 			: `${theme.fg("warning", stars(all.rating))} ${theme.fg("muted", all.rating.toFixed(1))}`;
 	lines.push(
-		`${theme.bold("连续")}  ${streakText}` +
+		`${theme.bold(str.historyStreak)}  ${streakText}` +
 			theme.fg("dim", "   ") +
-			theme.bold("累计") +
-			`  ${theme.fg("muted", `${all.sessions} 次 · ${all.reps} 个收缩 · ${formatSpan(all.contractMs)}`)}` +
+			theme.bold(str.historyTotal) +
+			`  ${theme.fg("muted", `${all.sessions} · ${all.reps} · ${formatSpan(all.contractMs)}`)}` +
 			theme.fg("dim", "   ") +
-			theme.bold("平均") +
+			theme.bold(str.historyAverage) +
 			`  ${avg}`,
 	);
 
 	lines.push("");
-	lines.push(theme.fg("dim", `近 ${window.length} 天（柱长 = 收缩时长，最长 ${formatSpan(Math.max(...window.map((d) => d.contractMs)))}）`));
+	lines.push(theme.fg("dim", str.historyWindowTitle(window.length, formatSpan(Math.max(...window.map((d) => d.contractMs))))));
 
 	const peak = Math.max(1, ...window.map((d) => d.contractMs));
 	for (const day of window) {
@@ -325,7 +324,7 @@ export function historyReport(theme: ReportTheme, history: HistoryEntry[], now: 
 		}
 		const filled = Math.max(1, Math.round((day.contractMs / peak) * BAR_CELLS));
 		const bar = theme.fg(isToday ? "accent" : "success", "█".repeat(filled)) + theme.fg("dim", "░".repeat(BAR_CELLS - filled));
-		const detail = `${day.sessions} 次 ${formatSpan(day.contractMs)}`.padEnd(11);
+		const detail = `${day.sessions} · ${formatSpan(day.contractMs)}`.padEnd(11);
 		lines.push(
 			`${dateText} ${bar} ${theme.fg("muted", detail)}${day.rating === undefined ? theme.fg("dim", "·····") : theme.fg("warning", stars(day.rating))}`,
 		);
@@ -334,12 +333,15 @@ export function historyReport(theme: ReportTheme, history: HistoryEntry[], now: 
 	const rated = [...history].filter((entry) => entry.rating !== undefined).reverse().slice(0, 5);
 	if (rated.length > 0) {
 		lines.push("");
-		lines.push(theme.fg("dim", "最近的感受"));
+		lines.push(theme.fg("dim", str.historyRecent));
 		for (const entry of rated) {
-			const when = `${dayKey(entry.at).slice(5)}`;
+			const when = dayKey(entry.at).slice(5);
 			const note = entry.note ? ` ${theme.fg("muted", entry.note)}` : "";
-			lines.push(`${theme.fg("dim", when)} ${theme.fg("warning", stars(entry.rating))} ${theme.fg("dim", ratingLabel(entry.rating))}${note}`);
+			lines.push(
+				`${theme.fg("dim", when)} ${theme.fg("warning", stars(entry.rating))} ${theme.fg("dim", ratingLabel(lang, entry.rating))}${note}`,
+			);
 		}
 	}
 	return lines;
 }
+

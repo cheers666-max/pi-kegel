@@ -1,5 +1,5 @@
 /**
- * Kegel trainer (凯格尔训练) extension for pi.
+ * Kegel trainer extension for pi.
  *
  * Shows a live contract/relax timer above the editor while the model is working,
  * so you can train your pelvic floor while waiting for the agent.
@@ -32,8 +32,16 @@ import {
 } from "./core.ts";
 import { KegelWidget, WIDGET_KEY, formatSummary } from "./widget.ts";
 import {
+	LANG_LABEL,
+	type Lang,
+	nextLang,
+	presetLabelIn,
+	resolveLang,
+	resolveVoice,
+	t,
+} from "./i18n.ts";
+import {
 	type HistoryEntry,
-	RATING_LABELS,
 	appendEntry,
 	historyReport,
 	parseHistory,
@@ -61,15 +69,16 @@ const SOUND_FILES: Record<string, string> = {
 /** The final-seconds tick: short and quiet, so it reads as a countdown. */
 const TICK_SOUND = "Pop.aiff";
 const TICK_VOLUME_FACTOR = 0.45;
-/** Spoken text for `cue: "voice"`. */
-const VOICE_TEXT: Record<string, string> = {
-	prepare: "准备",
-	contract: "收紧",
-	relax: "放松",
-	setRest: "休息",
-	done: "完成",
-	tick: "3",
-};
+/** Spoken cue text for the current language. */
+function voiceText(phase: string): string {
+	const cues = str().voiceCue as Record<string, string | undefined>;
+	return cues[phase] ?? "";
+}
+
+/** `say` voice for the current language (see `resolveVoice` in i18n.ts). */
+function voice(): string {
+	return resolveVoice(lang(), engine.config.voice);
+}
 /** Phases shorter than this never tick - a 1s rep would just chatter. */
 const TICK_MIN_PHASE_MS = 3500;
 
@@ -108,6 +117,15 @@ let autoPausedForIdle = false;
 /** Last `secondsLeft` we ticked, so each second fires exactly once. */
 let lastTickSecond = -1;
 let unlistenTerminalInput: (() => void) | null = null;
+
+/** The active language: resolved from `config.lang` ("auto" follows the env). */
+function lang(): Lang {
+	return resolveLang(engine.config.lang);
+}
+
+function str() {
+	return t(lang());
+}
 
 // ── persistence ─────────────────────────────────────────────────────────────
 
@@ -188,7 +206,7 @@ function playDetached(cmd: string, args: string[]): void {
 }
 
 function speak(text: string): void {
-	playDetached("say", ["-v", engine.config.voice, text]);
+	playDetached("say", ["-v", voice(), text]);
 }
 
 /**
@@ -202,7 +220,7 @@ function cue(kind: string, secondsLeft?: number): void {
 	if (mode === "off" || !isMac) return;
 
 	if (mode === "voice") {
-		const text = kind === "tick" ? String(secondsLeft ?? VOICE_TEXT.tick) : (VOICE_TEXT[kind] ?? "");
+		const text = kind === "tick" ? String(secondsLeft ?? "") : voiceText(kind);
 		if (text) speak(text);
 		return;
 	}
@@ -231,6 +249,7 @@ function ensureWidget(ctx: ExtensionContext): void {
 				() => agentBusy,
 				() => tui.terminal?.rows ?? 40,
 				() => engine.config.visual,
+				() => lang(),
 			);
 			return widgetRef;
 		},
@@ -266,7 +285,7 @@ function refreshStatus(ctx: ExtensionContext | null): void {
 		const color = engine.paused ? "warning" : engine.phase === "contract" ? "warning" : "success";
 		text = theme.fg(color, `${icon} ${engine.secondsLeft}s`);
 	} else if (engine.finished) {
-		text = theme.fg("success", `✓ ${engine.completedReps} 次`);
+		text = theme.fg("success", str().statusCounter(engine.completedReps));
 	}
 	if (text === lastStatus) return;
 	lastStatus = text ?? "";
@@ -344,7 +363,7 @@ function beginSession(ctx: ExtensionContext, source: "auto" | "manual"): void {
 	lastTickSecond = -1;
 	const events = engine.start();
 	// `start()` only reports transitions for zero-length phases, so the opening
-	// phase has to be announced explicitly or 准备 would be silent.
+	// phase has to be announced explicitly or "prepare" would be silent.
 	if (events.length > 0) handlePhaseChanges(events);
 	else cue(engine.phase);
 	ensureWidget(ctx);
@@ -366,12 +385,12 @@ function endSession(ctx: ExtensionContext | null, reason: string): void {
 	// They asked to stop: don't pop the flower back up for the rest of this run.
 	autoStartSuppressed = true;
 	ctx?.ui.setStatus(STATUS_KEY, undefined);
-	if (wasRunning && ctx?.hasUI) ctx.ui.notify(`🧘 结束训练（${reason}）· ${summary}`, "info");
+	if (wasRunning && ctx?.hasUI) ctx.ui.notify(str().notifyEnded(reason, summary), "info");
 }
 
 function onFinished(): void {
 	clearLinger();
-	// The phase transition already fired the 完成 cue - don't play it twice.
+	// The phase transition already fired the "done" cue - don't play it twice.
 	refreshStatus(activeCtx);
 	// The plan is done; let it linger, then stay away until the next prompt.
 	autoStartSuppressed = true;
@@ -379,7 +398,7 @@ function onFinished(): void {
 	// "today" tally below already includes this session.
 	void finishSession(activeCtx, "done");
 	if (activeCtx?.hasUI) {
-		activeCtx.ui.notify(`🧘 训练完成 · ${formatSummary(engine)}${todaySuffix()}`, "info");
+		activeCtx.ui.notify(str().notifyDone(formatSummary(engine, lang()), todaySuffix()), "info");
 	}
 	lingerTimer = setTimeout(() => {
 		lingerTimer = null;
@@ -423,10 +442,11 @@ async function finishSession(ctx: ExtensionContext | null, end: "done" | "stoppe
 
 /** The 1-5 "how did that feel?" dialog. Also reachable from the log menu. */
 async function rateSessionDialog(ctx: ExtensionContext, at: number): Promise<void> {
-	const options = [5, 4, 3, 2, 1].map((score) => `${score} 分 · ${RATING_LABELS[score]}`);
-	options.push("跳过（不评分）");
-	const choice = await ctx.ui.select("🧘 这次训练感觉如何？", options);
-	if (!choice || choice.startsWith("跳过")) return;
+	const texts = str();
+	const options = [5, 4, 3, 2, 1].map((score) => `${score} · ${texts.ratingScale[score]}`);
+	options.push(texts.ratingSkip);
+	const choice = await ctx.ui.select(texts.ratingTitle, options);
+	if (!choice || choice === texts.ratingSkip) return;
 	const score = Number.parseInt(choice, 10);
 	if (!Number.isFinite(score)) return;
 	const history = rateSession(loadHistory(), at, score);
@@ -434,46 +454,56 @@ async function rateSessionDialog(ctx: ExtensionContext, at: number): Promise<voi
 	const rated = history.find((item) => item.at === at);
 	const agg = totals(history, Date.now());
 	ctx.ui.notify(
-		`🧘 已记录 ${stars(rated?.rating)} ${ratingLabel(rated?.rating)} · 今日感受平均 ${agg.rating === undefined ? "—" : agg.rating.toFixed(1)}`,
+		texts.ratingRecorded(
+			stars(rated?.rating),
+			ratingLabel(lang(), rated?.rating),
+			agg.rating === undefined ? "—" : agg.rating.toFixed(1),
+		),
 		"info",
 	);
 }
 
-/** `/kegel` → 📈 训练记录: the report plus the actions that edit it. */
+/** `/kegel` -> training log: the report plus the actions that edit it. */
 async function openHistory(ctx: ExtensionContext): Promise<void> {
 	while (true) {
 		const history = loadHistory();
-		const report = historyReport(ctx.ui.theme, history, Date.now(), engine.config.historyDays);
+		const texts = str();
+		const report = historyReport(ctx.ui.theme, history, Date.now(), engine.config.historyDays, lang());
 		const latest = history[history.length - 1];
 		const actions = [
 			latest
-				? `⭐ 给最近一次评分（${dayLabel(latest.at)} ${stars(latest.rating)}）`
-				: "⭐ 给最近一次评分（暂无记录）",
-			latest ? `📝 给最近一次写备注${latest.note ? "（已有）" : ""}` : "📝 给最近一次写备注（暂无记录）",
-			`📅 显示天数：${engine.config.historyDays} 天`,
-			"🗑 清空全部记录",
-			"返回",
+				? texts.historyRateLatest(dayLabel(latest.at), stars(latest.rating))
+				: texts.historyRateNone,
+			latest
+				? `${texts.historyNoteLatest}${latest.note ? texts.historyNoteHas : ""}`
+				: `${texts.historyNoteLatest}${texts.historyNoteNone}`,
+			texts.historyDaysSetting(engine.config.historyDays),
+			texts.historyClear,
+			texts.historyBack,
 		];
-		const choice = await ctx.ui.select("📈 训练记录", [...report, "", ...actions]);
-		if (!choice || choice === "返回") return;
+		const choice = await ctx.ui.select(texts.historyTitle, [...report, "", ...actions]);
+		if (!choice || choice === texts.historyBack) return;
 		if (choice.startsWith("⭐")) {
 			if (latest) await rateSessionDialog(ctx, latest.at);
 		} else if (choice.startsWith("📝")) {
 			if (!latest) continue;
-			const note = await ctx.ui.input("备注（留空则清除）", latest.note ?? "例如：今天漏尿了 / 左侧发力更弱");
+			const note = await ctx.ui.input(texts.historyNoteTitle, latest.note ?? texts.historyNotePlaceholder);
 			if (note === undefined) continue;
 			writeHistory(rateSession(loadHistory(), latest.at, latest.rating, note));
-			ctx.ui.notify(note.trim() ? "📝 备注已保存" : "📝 备注已清除", "info");
+			ctx.ui.notify(note.trim() ? texts.historyNoteSaved : texts.historyNoteRemoved, "info");
 		} else if (choice.startsWith("📅")) {
-			const days = await askNumber(ctx, "记录显示多少天？(3-60)", String(engine.config.historyDays), 3, 60);
+			const days = await askNumber(ctx, texts.historyDaysTitle, String(engine.config.historyDays), 3, 60);
 			if (days === undefined) continue;
 			engine.applyConfig({ historyDays: days });
 			saveConfig(engine.config);
 		} else if (choice.startsWith("🗑")) {
-			const ok = await ctx.ui.confirm("清空训练记录？", `将删除全部 ${history.length} 条记录，无法撤销。`);
+			const ok = await ctx.ui.confirm(
+				texts.historyClearConfirmTitle,
+				texts.historyClearConfirmBody(history.length),
+			);
 			if (!ok) continue;
 			writeHistory([]);
-			ctx.ui.notify("🗑 训练记录已清空", "info");
+			ctx.ui.notify(texts.historyCleared, "info");
 		}
 	}
 }
@@ -482,7 +512,7 @@ function dayLabel(at: number): string {
 	return `${dayKey(at).slice(5)} ${new Date(at).toTimeString().slice(0, 5)}`;
 }
 
-/** ` · 今日 2 次 / 8:00` - read from the log, so it survives restarts. */
+/** ` · today 2 sessions / 8:00` - read from the log, so it survives restarts. */
 function todaySuffix(): string {
 	if (!engine.config.log) return "";
 	try {
@@ -492,8 +522,9 @@ function todaySuffix(): string {
 		const reps = entries.reduce((sum, entry) => sum + entry.reps, 0);
 		const contractMs = entries.reduce((sum, entry) => sum + entry.contractMs, 0);
 		const agg = totals(loadHistory(), now);
-		const streak = agg.streak > 1 ? ` · 连续 ${agg.streak} 天` : "";
-		return ` · 今日 ${entries.length} 次 / ${reps} 个收缩 / ${formatClock(contractMs)}${streak}`;
+		const texts = str();
+		const streak = agg.streak > 1 ? texts.streakSuffix(agg.streak) : "";
+		return texts.todaySuffix(entries.length, reps, formatClock(contractMs)) + streak;
 	} catch {
 		return "";
 	}
@@ -508,7 +539,7 @@ function sessionLive(): boolean {
 function runAction(ctx: ExtensionContext, action: KegelAction): void {
 	if (action === "toggle") toggleSession(ctx);
 	else if (action === "skip") skipPhase(ctx);
-	else endSession(ctx, "手动结束");
+	else endSession(ctx, str().notifyReasonManual);
 }
 
 /**
@@ -537,7 +568,7 @@ function registerOptionCharFallback(ctx: ExtensionContext): void {
 function toggleSession(ctx: ExtensionContext): void {
 	if (!engine.running) {
 		if (ctx.mode !== "tui") {
-			ctx.ui.notify("凯格尔训练界面需要交互式 TUI 模式", "warning");
+			ctx.ui.notify(str().notifyNotTui, "warning");
 			return;
 		}
 		beginSession(ctx, "manual");
@@ -554,7 +585,7 @@ function toggleSession(ctx: ExtensionContext): void {
 
 function skipPhase(ctx: ExtensionContext): void {
 	if (!engine.running) {
-		ctx.ui.notify("当前没有进行中的训练", "warning");
+		ctx.ui.notify(str().notifyNoSession, "warning");
 		return;
 	}
 	handlePhaseChanges(engine.skip());
@@ -564,9 +595,10 @@ function skipPhase(ctx: ExtensionContext): void {
 // ── /kegel menu ─────────────────────────────────────────────────────────────
 
 async function pickDifficulty(ctx: ExtensionContext): Promise<void> {
-	const labels = PRESETS.map((preset) => `${preset.name} — ${preset.detail}`);
-	labels.push("自定义…");
-	const choice = await ctx.ui.select("选择难度", labels);
+	const texts = str();
+	const labels = PRESETS.map((preset) => presetLabelIn(lang(), preset.id));
+	labels.push(texts.customOption);
+	const choice = await ctx.ui.select(texts.difficultyTitle, labels);
 	if (!choice) return;
 
 	const index = labels.indexOf(choice);
@@ -578,7 +610,7 @@ async function pickDifficulty(ctx: ExtensionContext): Promise<void> {
 	if (!preset) return;
 	const workout = configFromPreset(preset.id);
 	if (!workout) return;
-	applyWorkout(ctx, preset.name, workout);
+	applyWorkout(ctx, t(lang()).presetNames[preset.id] ?? preset.id, workout);
 }
 
 async function askNumber(
@@ -593,7 +625,7 @@ async function askNumber(
 	if (raw === undefined || raw.trim() === "") return undefined;
 	const value = Number(raw.trim());
 	if (!Number.isFinite(value)) {
-		ctx.ui.notify("请输入数字", "warning");
+		ctx.ui.notify(str().notifyNumberRequired, "warning");
 		return undefined;
 	}
 	const floor = allowZero ? 0 : min;
@@ -601,24 +633,25 @@ async function askNumber(
 }
 
 async function pickVolume(ctx: ExtensionContext, current: number): Promise<void> {
-	const percent = await askNumber(ctx, "音量 (0-100)", String(Math.round(current * 100)), 0, 100, true);
+	const percent = await askNumber(ctx, str().volumeTitle, String(Math.round(current * 100)), 0, 100, true);
 	if (percent === undefined) return;
 	engine.applyConfig({ volume: percent / 100 });
 	previewCue();
 }
 
 async function pickCustom(ctx: ExtensionContext): Promise<void> {
-	const contractSec = await askNumber(ctx, "收缩几秒？(1-120)", "10", 1, 120);
+	const texts = str();
+	const contractSec = await askNumber(ctx, texts.customContractTitle, "10", 1, 120);
 	if (contractSec === undefined) return;
-	const relaxSec = await askNumber(ctx, "放松几秒？(1-120)", "10", 1, 120);
+	const relaxSec = await askNumber(ctx, texts.customRelaxTitle, "10", 1, 120);
 	if (relaxSec === undefined) return;
-	const reps = await askNumber(ctx, "每组做几次？(0 = 无限循环)", "8", 1, 200, true);
+	const reps = await askNumber(ctx, texts.customRepsTitle, "8", 1, 200, true);
 	if (reps === undefined) return;
-	const sets = await askNumber(ctx, "做几组？(0 = 无限循环)", "3", 1, 50, true);
+	const sets = await askNumber(ctx, texts.customSetsTitle, "3", 1, 50, true);
 	if (sets === undefined) return;
-	const setRestSec = await askNumber(ctx, "组间休息几秒？(0 = 不休息)", "30", 0, 300, true);
+	const setRestSec = await askNumber(ctx, texts.customSetRestTitle, "30", 0, 300, true);
 	if (setRestSec === undefined) return;
-	applyWorkout(ctx, "自定义", { contractSec, relaxSec, reps, sets, setRestSec });
+	applyWorkout(ctx, str().custom, { contractSec, relaxSec, reps, sets, setRestSec });
 }
 
 function applyWorkout(ctx: ExtensionContext, name: string, workout: Partial<KegelConfig>): void {
@@ -629,68 +662,79 @@ function applyWorkout(ctx: ExtensionContext, name: string, workout: Partial<Kege
 	refreshStatus(ctx);
 	requestRender();
 	const duration = estimateDuration(engine.config);
-	const tail = duration ? `（约 ${Math.round(duration / 60000)} 分钟）` : "（无限循环）";
-	ctx.ui.notify(`🎚 难度已设为 ${name} · ${formatPlan(engine.config)}${tail}`, "info");
+	const texts = str();
+	const tail = duration ? texts.estimateMinutes(Math.round(duration / 60000)) : texts.estimateEndless;
+	ctx.ui.notify(texts.notifyLevelSet(name, formatPlan(engine.config), tail), "info");
 	if (wasRunning) {
-		void ctx.ui.select("当前有训练在进行，何时应用？", ["下次开始时应用", "立即重新开始"]).then((choice) => {
-			if (choice === "立即重新开始") beginSession(ctx, "manual");
-		});
+		const applyTexts = str();
+		void ctx.ui
+			.select(applyTexts.applyWhenTitle, [applyTexts.applyNext, applyTexts.applyNow])
+			.then((choice) => {
+				if (choice === applyTexts.applyNow) beginSession(ctx, "manual");
+			});
 	}
 }
 
-async function openSettings(ctx: ExtensionContext): Promise<void> {	while (true) {
+async function openSettings(ctx: ExtensionContext): Promise<void> {
+	while (true) {
 		const config = engine.config;
-		const onOff = (value: boolean) => (value ? "开" : "关");
+		const texts = str();
 		const cueLabel =
 			config.cue === "system"
-				? `系统音 ${Math.round(config.volume * 100)}%`
+				? texts.systemSound(Math.round(config.volume * 100))
 				: config.cue === "voice"
-					? `语音（${config.voice}）`
-					: "关";
-		const choice = await ctx.ui.select("其它设置", [
-			`音效：${cueLabel}`,
-			`结束前滴答：${config.tickLastSec > 0 ? `最后 ${config.tickLastSec} 秒` : "关"}`,
-			`可视化：${config.visual === "bloom" ? "花瓣绽放" : "进度条"}`,
-			`花瓣绽开于：${config.bloomOn === "relax" ? "放松时（收紧→聚拢）" : "收缩时（收紧→绽开）"}`,
-			`记录训练：${onOff(config.log)}`,
-			`练完询问感受：${onOff(config.askRating)}`,
-			`模型开始工作时自动开始：${onOff(config.autoStart)}`,
-			`模型结束后自动结束：${onOff(config.autoStop)}`,
-			`模型空闲时自动暂停：${onOff(config.pauseWhenIdle)}`,
-			`准备倒计时：${config.prepareSec}s`,
-			"返回",
+					? texts.spoken(voice())
+					: texts.off;
+		const choice = await ctx.ui.select(texts.settingsTitle, [
+			`${texts.settingsCue}${cueLabel}`,
+			`${texts.settingsTick}${config.tickLastSec > 0 ? texts.settingsTickValue(config.tickLastSec) : texts.off}`,
+			`${texts.settingsVisual}${config.visual === "bloom" ? texts.visualBloom : texts.visualBar}`,
+			`${texts.settingsBloomOn}${config.bloomOn === "relax" ? texts.bloomOnRelax : texts.bloomOnContract}`,
+			`${texts.settingsLang}${LANG_LABEL[lang()]}`,
+			`${texts.settingsLog}${texts.onOff(config.log)}`,
+			`${texts.settingsAskRating}${texts.onOff(config.askRating)}`,
+			`${texts.settingsAutoStart}${texts.onOff(config.autoStart)}`,
+			`${texts.settingsAutoStop}${texts.onOff(config.autoStop)}`,
+			`${texts.settingsPauseWhenIdle}${texts.onOff(config.pauseWhenIdle)}`,
+			`${texts.settingsPrepare}${config.prepareSec}s`,
+			texts.settingsBack,
 		]);
-		if (!choice || choice === "返回") return;
-		if (choice.startsWith("音效")) {
+		if (!choice || choice === texts.settingsBack) return;
+		if (choice.startsWith(texts.settingsCue)) {
 			// system -> voice -> off -> system
 			const next = config.cue === "system" ? "voice" : config.cue === "voice" ? "off" : "system";
 			engine.applyConfig({ cue: next });
 			if (next !== "off") previewCue();
 			if (next === "system") await pickVolume(ctx, config.volume);
-		} else if (choice.startsWith("结束前滴答")) {
-			const seconds = await askNumber(ctx, "结束前几秒开始滴答？(0-10，0=关)", String(config.tickLastSec), 0, 10, true);
+		} else if (choice.startsWith(texts.settingsTick)) {
+			const seconds = await askNumber(ctx, texts.tickTitle, String(config.tickLastSec), 0, 10, true);
 			if (seconds === undefined) continue;
 			engine.applyConfig({ tickLastSec: seconds });
 			if (engine.config.tickLastSec > 0) cue("tick", engine.config.tickLastSec);
-		} else if (choice.startsWith("可视化")) {
+		} else if (choice.startsWith(texts.settingsVisual)) {
 			engine.applyConfig({ visual: config.visual === "bloom" ? "bar" : "bloom" });
 			invalidateWidget();
-		} else if (choice.startsWith("花瓣绽开于")) {
+		} else if (choice.startsWith(texts.settingsBloomOn)) {
 			engine.applyConfig({ bloomOn: config.bloomOn === "relax" ? "contract" : "relax" });
 			invalidateWidget();
-		} else if (choice.startsWith("记录训练")) {
+		} else if (choice.startsWith(texts.settingsLang)) {
+			const next = nextLang(lang());
+			engine.applyConfig({ lang: next });
+			invalidateWidget();
+			ctx.ui.notify(t(next).notifyLangChanged(LANG_LABEL[next]), "info");
+		} else if (choice.startsWith(texts.settingsLog)) {
 			engine.applyConfig({ log: !config.log });
-			if (!engine.config.log) ctx.ui.notify("已关闭记录（已有记录保留，可在「训练记录」里查看/清空）", "info");
-		} else if (choice.startsWith("练完询问感受")) {
+			if (!engine.config.log) ctx.ui.notify(texts.notifyLogOff, "info");
+		} else if (choice.startsWith(texts.settingsAskRating)) {
 			engine.applyConfig({ askRating: !config.askRating });
-		} else if (choice.startsWith("模型开始")) {
+		} else if (choice.startsWith(texts.settingsAutoStart)) {
 			engine.applyConfig({ autoStart: !config.autoStart });
-		} else if (choice.startsWith("模型结束")) {
+		} else if (choice.startsWith(texts.settingsAutoStop)) {
 			engine.applyConfig({ autoStop: !config.autoStop });
-		} else if (choice.startsWith("模型空闲")) {
+		} else if (choice.startsWith(texts.settingsPauseWhenIdle)) {
 			engine.applyConfig({ pauseWhenIdle: !config.pauseWhenIdle });
-		} else if (choice.startsWith("准备倒计时")) {
-			const seconds = await askNumber(ctx, "准备倒计时几秒？(0-30)", "3", 0, 30, true);
+		} else if (choice.startsWith(texts.settingsPrepare)) {
+			const seconds = await askNumber(ctx, texts.prepareTitle, "3", 0, 30, true);
 			if (seconds === undefined) continue;
 			engine.applyConfig({ prepareSec: seconds });
 		}
@@ -698,14 +742,31 @@ async function openSettings(ctx: ExtensionContext): Promise<void> {	while (true)
 	}
 }
 
+/** `/kegel lang [zh|en|auto]` - switch, or cycle when no argument is given. */
+function switchLang(ctx: ExtensionContext, arg: string): void {
+	const wanted = arg.trim().toLowerCase();
+	const next: Lang | "auto" = wanted === "zh" || wanted === "en" || wanted === "auto" ? wanted : nextLang(lang());
+	engine.applyConfig({ lang: next });
+	saveConfig(engine.config);
+	invalidateWidget();
+	ctx.ui.notify(t(resolveLang(next)).notifyLangChanged(LANG_LABEL[next]), "info");
+}
+
 async function showStatus(ctx: ExtensionContext): Promise<void> {
+	const texts = str();
 	const presetId = presetIdFor(engine.config);
-	const preset = PRESETS.find((item) => item.id === presetId);
+	const state = engine.running
+		? engine.paused
+			? texts.statePaused
+			: texts.stateRunning
+		: engine.finished
+			? texts.stateFinished
+			: texts.stateIdle;
 	const lines = [
-		`难度：${preset ? preset.name : "自定义"}`,
-		`计划：${formatPlan(engine.config)}`,
-		`状态：${engine.running ? (engine.paused ? "已暂停" : "进行中") : engine.finished ? "已完成" : "待机"}`,
-		`进度：已完成 ${engine.completedReps} 次 · 累计收缩 ${formatClock(engine.totalContractMs)}`,
+		texts.statusDifficulty(presetId ? (texts.presetNames[presetId] ?? texts.custom) : texts.custom),
+		texts.statusPlan(formatPlan(engine.config)),
+		texts.statusState(state),
+		texts.statusProgress(engine.completedReps, formatClock(engine.totalContractMs)),
 	];
 	if (engine.config.log) {
 		const history = loadHistory();
@@ -714,56 +775,73 @@ async function showStatus(ctx: ExtensionContext): Promise<void> {
 		const reps = today.reduce((sum, entry) => sum + entry.reps, 0);
 		const contractMs = today.reduce((sum, entry) => sum + entry.contractMs, 0);
 		lines.push(
-			`记录：共 ${agg.sessions} 次 · 连续 ${agg.streak} 天 · 平均感受 ${agg.rating === undefined ? "未评分" : `${stars(agg.rating)} ${agg.rating.toFixed(1)}`}`,
-			`今日：${today.length} 次 · ${reps} 个收缩 · ${formatClock(contractMs)}`,
+			texts.statusLog(
+				agg.sessions,
+				agg.streak,
+				agg.rating === undefined ? texts.historyUnrated : `${stars(agg.rating)} ${agg.rating.toFixed(1)}`,
+			),
+			texts.statusToday(today.length, reps, formatClock(contractMs)),
 		);
 	}
-	if (engine.config.sets > 0) lines.push(`当前：第 ${engine.set}/${engine.config.sets} 组`);
+	if (engine.config.sets > 0) lines.push(texts.statusCurrentSet(engine.set, engine.config.sets));
 	lines.push(
-		`可视化：${engine.config.visual === "bloom" ? "花瓣绽放" : "进度条"}`,
-		`音效：${engine.config.cue === "system" ? `系统音 ${Math.round(engine.config.volume * 100)}%` : engine.config.cue === "voice" ? `语音 ${engine.config.voice}` : "关"}`,
-		`结束前滴答：${engine.config.tickLastSec > 0 ? `最后 ${engine.config.tickLastSec} 秒` : "关"}`,
+		texts.statusVisual(engine.config.visual === "bloom" ? texts.visualBloom : texts.visualBar),
+		texts.statusCue(
+			engine.config.cue === "system"
+				? texts.systemSound(Math.round(engine.config.volume * 100))
+				: engine.config.cue === "voice"
+					? texts.spoken(voice())
+					: texts.off,
+		),
+		texts.statusTick(engine.config.tickLastSec > 0 ? texts.settingsTickValue(engine.config.tickLastSec) : texts.off),
 		engine.config.visual === "bloom"
-			? `花瓣尺寸：${Math.min(11, Math.max(3, Math.round(((tuiRef?.terminal?.rows ?? 40) - 14) / 3)))} 行（随终端高度自适应）`
+			? texts.statusFlowerSize(Math.min(11, Math.max(3, Math.round(((tuiRef?.terminal?.rows ?? 40) - 14) / 3))))
 			: "",
-		isKittyProtocolActive()
-			? "键盘：ctrl+shift+k/n/e 可用（kitty 协议）"
-			: "键盘：alt+k/n/e（Option 字符已自动兼容）或 ctrl+shift+k/n/e",
+		isKittyProtocolActive() ? texts.statusKeysKitty : texts.statusKeysOption,
 	);
-	await ctx.ui.select("凯格尔训练状态", lines);
+	await ctx.ui.select(texts.statusTitle, lines);
 }
 
 async function openMenu(ctx: ExtensionContext): Promise<void> {
 	while (true) {
-		const choice = await ctx.ui.select("🧘 凯格尔训练", [
-			engine.running ? (engine.paused ? "▶️ 继续" : "⏸ 暂停") : "▶️ 开始训练",
-			"⏭ 跳过当前阶段",
-			"⏹ 结束训练",
-			"🎚 选择难度",
-			"📈 训练记录",
-			"⚙️ 其它设置",
-			"ℹ️ 查看状态",
-			"关闭",
-		]);
-		if (!choice || choice === "关闭") return;
-		if (choice.endsWith("开始训练") || choice.endsWith("暂停") || choice.endsWith("继续")) {
+		const texts = str();
+		// Dispatch by key, not by matching localized text - an English label could
+		// otherwise collide with another entry's substring.
+		const items: Array<{ label: string; key: string }> = [
+			{
+				label: engine.running ? (engine.paused ? texts.menuResume : texts.menuPause) : texts.menuStart,
+				key: "toggle",
+			},
+			{ label: texts.menuSkip, key: "skip" },
+			{ label: texts.menuEnd, key: "end" },
+			{ label: texts.menuDifficulty, key: "difficulty" },
+			{ label: texts.menuHistory, key: "history" },
+			{ label: texts.menuSettings, key: "settings" },
+			{ label: texts.menuStatus, key: "status" },
+			{ label: texts.menuClose, key: "close" },
+		];
+		const choice = await ctx.ui.select(texts.appTitle, items.map((item) => item.label));
+		const key = items.find((item) => item.label === choice)?.key;
+		if (!key || key === "close") return;
+		if (key === "toggle") {
 			toggleSession(ctx);
-		} else if (choice.includes("跳过")) {
+		} else if (key === "skip") {
 			skipPhase(ctx);
-		} else if (choice.includes("结束训练")) {
-			endSession(ctx, "手动结束");
+		} else if (key === "end") {
+			endSession(ctx, texts.notifyReasonManual);
 			return;
-		} else if (choice.includes("选择难度")) {
+		} else if (key === "difficulty") {
 			await pickDifficulty(ctx);
-		} else if (choice.includes("训练记录")) {
+		} else if (key === "history") {
 			await openHistory(ctx);
-		} else if (choice.includes("其它设置")) {
+		} else if (key === "settings") {
 			await openSettings(ctx);
-		} else if (choice.includes("查看状态")) {
+		} else if (key === "status") {
 			await showStatus(ctx);
 		}
 	}
 }
+
 
 // ── extension entry point ───────────────────────────────────────────────────
 
@@ -838,7 +916,7 @@ export default function kegelExtension(pi: ExtensionAPI) {
 		// The run is over; the next prompt may auto-start again.
 		autoStartSuppressed = false;
 		if (engine.config.autoStop && engine.running) {
-			endSession(ctx, "模型已结束");
+			endSession(ctx, str().notifyReasonAgentSettled);
 			return;
 		}
 		// Don't burn through the plan while nothing is on screen: freeze instead.
@@ -851,18 +929,28 @@ export default function kegelExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("kegel", {
-		description: "凯格尔训练：难度 / 开始 / 暂停 / 结束（也可用 alt+k / ctrl+shift+k）",
+		// Registered once at load time, so it can't follow a runtime language switch
+		// - show both languages instead of going stale.
+		description: "Kegel trainer / 凯格尔训练：难度 · 开始 · 暂停 · 结束（alt+k / ctrl+shift+k）",
 		handler: async (args, ctx) => {
 			const command = args.trim().toLowerCase();
 			if (command === "start" || command === "begin") return toggleSession(ctx);
-			if (command === "stop" || command === "end") return endSession(ctx, "手动结束");
+			if (command === "stop" || command === "end") return endSession(ctx, str().notifyReasonManual);
 			if (command === "next" || command === "skip") return skipPhase(ctx);
 			if (command === "pause" || command === "resume") return toggleSession(ctx);
 			if (command === "status") return showStatus(ctx);
+			if (command === "lang" || command.startsWith("lang ")) {
+				return switchLang(ctx, command.slice(4).trim());
+			}
 			if (command) {
 				const workout = configFromPreset(command);
-				if (workout) return applyWorkout(ctx, command, workout);
-				ctx.ui.notify(`未知参数：${command}。可用：start / stop / next / status / ${PRESETS.map((p) => p.id).join(" / ")}`, "warning");
+				if (workout) {
+					return applyWorkout(ctx, str().presetNames[command] ?? command, workout);
+				}
+				ctx.ui.notify(
+					str().notifyUnknownArg(command, `start / stop / next / status / lang / ${PRESETS.map((p) => p.id).join(" / ")}`),
+					"warning",
+				);
 				return;
 			}
 			return openMenu(ctx);
@@ -872,32 +960,32 @@ export default function kegelExtension(pi: ExtensionAPI) {
 	// alt+* works when the terminal reports Option as meta, or through the composed-character
 	// fallback registered in session_start. ctrl+shift+* is the path that needs no config.
 	pi.registerShortcut("alt+k", {
-		description: "凯格尔：开始/暂停",
+		description: "Kegel: start/pause · 凯格尔：开始/暂停",
 		handler: (ctx) => toggleSession(ctx),
 	});
 
 	pi.registerShortcut("alt+n", {
-		description: "凯格尔：跳过当前阶段",
+		description: "Kegel: skip phase · 凯格尔：跳过当前阶段",
 		handler: (ctx) => skipPhase(ctx),
 	});
 
 	pi.registerShortcut("alt+e", {
-		description: "凯格尔：结束训练",
-		handler: (ctx) => endSession(ctx, "手动结束"),
+		description: "Kegel: end session · 凯格尔：结束训练",
+		handler: (ctx) => endSession(ctx, str().notifyReasonManual),
 	});
 
 	pi.registerShortcut("ctrl+shift+k", {
-		description: "凯格尔：开始/暂停（备用键）",
+		description: "Kegel: start/pause (fallback key) · 凯格尔：开始/暂停（备用键）",
 		handler: (ctx) => toggleSession(ctx),
 	});
 
 	pi.registerShortcut("ctrl+shift+n", {
-		description: "凯格尔：跳过当前阶段（备用键）",
+		description: "Kegel: skip phase (fallback key) · 凯格尔：跳过当前阶段（备用键）",
 		handler: (ctx) => skipPhase(ctx),
 	});
 
 	pi.registerShortcut("ctrl+shift+e", {
-		description: "凯格尔：结束训练（备用键）",
-		handler: (ctx) => endSession(ctx, "手动结束"),
+		description: "Kegel: end session (fallback key) · 凯格尔：结束训练（备用键）",
+		handler: (ctx) => endSession(ctx, str().notifyReasonManual),
 	});
 }

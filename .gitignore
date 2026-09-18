@@ -1,4 +1,5 @@
 node_modules/
-tools/frames.json
+# generated intermediates (regenerate with tools/render-frames.mjs)
+tools/frames*.json
 .DS_Store
 __pycache__/
